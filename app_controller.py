@@ -1,5 +1,3 @@
-# app_controller_optimized.py - Version optimisée
-
 import pandas as pd
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThread, QMutex
 from sklearn.preprocessing import StandardScaler
@@ -10,16 +8,13 @@ from contextlib import contextmanager
 import logging
 from ui_dialogs import ProcessingDialog
 
-# Import des modules de votre application
 from Core.data_processor import load_data, define_internal_event_cycle, balance_dataset, extract_activity_blocks
 from Core.feature_extractor import extract_features
-# Dans Core.model_trainer
 from Core.model_trainer import (
     train_and_evaluate_knn,
     train_and_evaluate_rf,
     train_and_evaluate_lgbm,
     train_and_evaluate_nn,
-    #train_and_evaluate_lstm_pinn,  # <-- AJOUTEZ CETTE LIGNE
     ModelConfig
 )
 from tensorflow.keras.models import Model as KerasModel
@@ -27,16 +22,11 @@ from Core.explainer import ModelExplainer
 from Core.model_manager import save_model, list_saved_models, load_model_report, load_model_and_config
 from Core.data_processor import create_binary_target
 from Core.synthetic_data_generator import generate_realistic_synthetic_data
-# Dans app_controller.py, en haut avec les autres imports
 from Core.model_trainer import create_sequences, derive_state_from_forecast
 
 
 
 class WorkerThread(QThread):
-    """
-    Thread worker optimisé pour les opérations longues.
-    Il peut désormais signaler sa progression et être annulé depuis l'extérieur.
-    """
     result_ready = pyqtSignal(object)
     
     error_occurred = pyqtSignal(str, str)
@@ -44,62 +34,35 @@ class WorkerThread(QThread):
     progress_updated = pyqtSignal(int, str)
     
     def __init__(self, func: Callable, *args, **kwargs):
-        """
-        Initialise le worker.
-        :param func: La fonction à exécuter dans le thread.
-        :param args: Les arguments positionnels pour la fonction.
-        :param kwargs: Les arguments par mot-clé pour la fonction.
-        """
         super().__init__()
         self.func = func
         self.args = args
         self.kwargs = kwargs
         
-        # NOUVEAU : Flag interne pour gérer la demande d'annulation.
-        # Il est volatile pour assurer une visibilité correcte entre les threads.
         self._is_cancelled = False
 
     def run(self):
-        """
-        Le cœur du thread. Cette méthode est exécutée lorsque le thread est démarré.
-        Elle prépare et appelle la fonction cible.
-        """
         try:
-            # --- Injection des callbacks de communication ---
-            # Nous ajoutons dynamiquement deux arguments à la fonction cible :
-            # 1. 'update_progress': un callback pour signaler la progression.
-            # 2. 'is_cancelled': une fonction pour vérifier si l'annulation a été demandée.
             self.kwargs['update_progress'] = self.progress_updated.emit
             self.kwargs['is_cancelled'] = lambda: self._is_cancelled
             
-            # Appel de la fonction cible avec tous ses arguments
             result = self.func(*self.args, **self.kwargs)
             
-            # Si le flag d'annulation a été activé pendant l'exécution,
-            # on ne signale pas que le résultat est prêt, même si la fonction
-            # a retourné quelque chose. Le thread se terminera silencieusement.
             if self._is_cancelled:
                 return
             else:
                 self.result_ready.emit(result)
 
         except Exception as e:
-            # En cas d'exception, on ne l'émet comme une erreur que si la tâche
-            # n'a pas été annulée manuellement.
             if not self._is_cancelled:
                 import traceback
                 error_message = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
                 self.error_occurred.emit(f"Erreur dans le Worker ({type(e).__name__})", error_message)
 
     def cancel(self):
-        """
-        Méthode publique appelée depuis le thread principal (UI) pour demander
-        l'arrêt de la tâche.
-        """
         self.progress_updated.emit(self.progress_bar.value(), "Annulation demandée...")
         self._is_cancelled = True
 class DataCache:
-    """Cache intelligent pour éviter les recalculs"""
     def __init__(self, max_size: int = 5):
         self.cache = {}
         self.access_order = []
@@ -141,13 +104,11 @@ class AppConfig:
     DEFAULT_SIMULATION_SPEED = 100
     CACHE_SIZE = 10
     
-    # Ratios par défaut
     DEFAULT_PRE_EVENT_RATIO = 1.0
     DEFAULT_POST_EVENT_RATIO = 0.5
 
 
 class AppController(QObject):
-    # --- SIGNAUX (inchangés) ---
     status_updated = pyqtSignal(str)
     error_occurred = pyqtSignal(str, str)
     data_loaded = pyqtSignal(pd.DataFrame)
@@ -162,7 +123,7 @@ class AppController(QObject):
     simulation_started = pyqtSignal(dict)
     simulation_step_updated = pyqtSignal(dict)
     simulation_finished = pyqtSignal(str)
-    explanation_ready = pyqtSignal(object, object, object, list) # (model, shap_values, base_value, instance_data)
+    explanation_ready = pyqtSignal(object, object, object, list) 
     segmentation_finished = pyqtSignal(dict)
     segmentation_log_updated = pyqtSignal(str)
     whatif_analysis_finished = pyqtSignal(dict)
@@ -173,19 +134,15 @@ class AppController(QObject):
         self.config = AppConfig()
         self.cache = DataCache(self.config.CACHE_SIZE)
         self.logger = self._setup_logger()
-        
-        # État de l'application (optimisé)
+
         self._reset_state()
-        self.current_explainer = None # Ajouter cet attribut
-        
-        # Simulation
+        self.current_explainer = None 
+    
         self._setup_simulation()
-        
-        # Thread management
+    
         self.active_workers = []
 
     def _setup_logger(self) -> logging.Logger:
-        """Configuration du logging"""
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
         return logger
@@ -205,7 +162,6 @@ class AppController(QObject):
 
     def _whatif_task(self, model_name: str, scenario_df: pd.DataFrame, 
                      update_progress: Callable, is_cancelled: Callable):
-        """Tâche de fond pour l'analyse de scénario."""
         update_progress(10, f"Chargement du modèle '{model_name}'...")
         model, config = load_model_and_config(model_name)
         if not model or not config: raise ValueError("Impossible de charger le modèle.")
@@ -224,7 +180,6 @@ class AppController(QObject):
     def _reset_state(self):
         """Réinitialise l'état de l'application"""
         self.original_df = None
-        #self.processed_df = None
         self.feature_matrix = None
         self.last_training_results = None
         self.last_feature_config = None
@@ -242,9 +197,7 @@ class AppController(QObject):
         self.simulation_index = 0
         self.simulation_speed_ms = self.config.DEFAULT_SIMULATION_SPEED
 
-    # --- DÉCORATEURS UTILITAIRES ---
     def _require_data(func):
-        """Décorateur pour vérifier la présence de données"""
         @wraps(func)
         def wrapper(self, *args, **kwargs):
             if self.original_df is None:
@@ -254,7 +207,6 @@ class AppController(QObject):
         return wrapper
 
     def _require_features(func):
-        """Décorateur pour vérifier la présence de features"""
         @wraps(func)
         def wrapper(self, *args, **kwargs):
             if self.feature_matrix is None:
@@ -264,7 +216,6 @@ class AppController(QObject):
         return wrapper
 
     def _run_in_thread(self, func: Callable, callback: Optional[Callable] = None, *args, **kwargs) -> WorkerThread:
-        # Cette fonction DOIT maintenant retourner le worker
         worker = WorkerThread(func, *args, **kwargs)
         if callback:
             worker.result_ready.connect(callback)
@@ -274,29 +225,23 @@ class AppController(QObject):
         worker.start()
         return worker
 
-    # --- MÉTHODES UTILITAIRES OPTIMISÉES ---
     @lru_cache(maxsize=10)
     def _create_temporal_weights(self, length: int, decay_rate: float) -> np.ndarray:
-        """Version optimisée avec cache des poids temporels"""
         time_indices = np.arange(length)
         weights = np.exp(decay_rate * (time_indices - time_indices.max()))
         return weights
 
     def _get_cached_features(self, df_hash: str, config: dict) -> Optional[pd.DataFrame]:
-        """Récupère les features du cache si disponibles"""
         cache_key = f"features_{df_hash}_{hash(str(config))}"
         return self.cache.get(cache_key)
 
     def _cache_features(self, df_hash: str, config: dict, features: pd.DataFrame):
-        """Met en cache les features calculées"""
         cache_key = f"features_{df_hash}_{hash(str(config))}"
         self.cache.set(cache_key, features)
-
-    # --- 1. GESTION DES DONNÉES (optimisée) ---
+        
     def load_data_from_file(self, filepath: str) -> WorkerThread:
         """Charge les données de manière asynchrone et retourne le worker."""
         
-        # Tâche pour le thread
         def _load_task(update_progress: Callable, is_cancelled: Callable):
             update_progress(10, "Ouverture du fichier...")
             df = load_data(filepath)
@@ -304,27 +249,21 @@ class AppController(QObject):
             update_progress(100, "Fichier chargé.")
             return df
         
-        # Callback qui s'exécute à la fin
         def _on_data_loaded(df: pd.DataFrame):
             self.original_df = df
             self.status_updated.emit(f"Fichier chargé. {len(df)} lignes.")
             self.data_loaded.emit(df)
             self.overview_ready.emit(df)
         
-        # Appel unique et correct à la fin
         return self._run_in_thread(_load_task, _on_data_loaded)
 
 
     @_require_data
     def run_segmentation_training(self, params: dict):
-        """
-        Lance la pipeline complète pour entraîner le Segmenteur.
-        """
         if not self.last_training_results or 'model' not in self.last_training_results:
             self.error_occurred.emit("Erreur", "Veuillez d'abord entraîner un modèle Détecteur (Étape 3).")
             return None
         
-        # Le worker exécutera cette nouvelle tâche
         worker = self._run_in_thread(
             self._segmentation_task,
             self._on_segmentation_complete,
@@ -333,16 +272,12 @@ class AppController(QObject):
         return worker
 
     def _segmentation_task(self, params: dict, update_progress: Callable, is_cancelled: Callable) -> Optional[dict]:
-        """
-        Tâche de fond pour l'entraînement du Segmenteur.
-        """
         try:
-            # --- ÉTAPE 2.1 : OBTENIR LE DATASET DU SEGMENTEUR ---
             update_progress(10, "Application du Détecteur pour trouver les zones actives...")
             self.segmentation_log_updated.emit("1. Utilisation du Détecteur binaire pour prédire les zones d'activité...")
             
             detector_model = self.last_training_results['model']
-            # On utilise toutes les features calculées précédemment sur l'ensemble des données
+           
             all_features = self.feature_matrix.reindex(columns=detector_model.feature_names_in_, fill_value=0)
             detector_predictions = detector_model.predict(all_features)
             
@@ -352,7 +287,7 @@ class AppController(QObject):
             update_progress(25, "Extraction des blocs actifs du dataset original...")
             self.segmentation_log_updated.emit("2. Extraction des segments de données correspondant à ces zones...")
             
-            # Nouvelle fonction pour isoler les données
+        
             segmenter_raw_df = extract_activity_blocks(self.original_df, pd.Series(detector_predictions, index=all_features.index))
             
             if segmenter_raw_df.empty:
@@ -362,25 +297,21 @@ class AppController(QObject):
             self.segmentation_log_updated.emit(f"   -> Le nouveau jeu de données pour le Segmenteur contient {len(segmenter_raw_df)} lignes.")
             if is_cancelled(): return None
 
-            # --- ÉTAPE 2.2 : INGÉNIERIE DES CARACTÉRISTIQUES SPÉCIFIQUE ---
+    
             update_progress(40, "Recalcul des features sur les données actives...")
             self.segmentation_log_updated.emit("3. Recalcul des caractéristiques spécifiques au régime actif...")
             
-            # On utilise la même configuration de features que pour le Détecteur
             feature_config = self.last_feature_config
             segmenter_features = extract_features(segmenter_raw_df, feature_config)
             
             self.segmentation_log_updated.emit(f"   -> {segmenter_features.shape[1]} caractéristiques recalculées.")
             if is_cancelled() or segmenter_features.empty: return None
 
-            # --- ÉTAPE 2.3 : ENTRAÎNEMENT DU SEGMENTEUR ---
             update_progress(60, "Préparation des labels pour la segmentation...")
             self.segmentation_log_updated.emit("4. Préparation des labels cibles (Pre-Event, High-Paroxysm, Post-Event)...")
             
-            # Préparation des labels multi-classes sur le jeu de données du segmenteur
             segmenter_labeled_df = define_internal_event_cycle(segmenter_raw_df, pre_event_ratio=0.3)
 
-            # Alignement
             y_s = segmenter_labeled_df.set_index('Date')['Ramp']
             common_index = segmenter_features.index.intersection(y_s.index)
             X_s = segmenter_features.loc[common_index]
@@ -391,21 +322,17 @@ class AppController(QObject):
             update_progress(75, "Entraînement du modèle de segmentation...")
             self.segmentation_log_updated.emit("5. Lancement de l'entraînement du Segmenteur multi-classes...")
             
-            # Séparation temporelle des données du Segmenteur
             n = len(X_s)
             train_end = int(n * 0.8)
             X_s_train, y_s_train = X_s.iloc[:train_end], y_s.iloc[:train_end]
             X_s_test, y_s_test = X_s.iloc[train_end:], y_s.iloc[train_end:]
 
-            # Utilisation des fonctions d'entraînement existantes
-            # Note: Le Segmenteur pourrait bénéficier de son propre ModelConfig
             model_config = ModelConfig(**params.get('model_params', {}))
             seg_results = train_and_evaluate_rf(X_s_train, y_s_train, None, None, X_s_test, y_s_test, model_config)
             
             self.segmentation_log_updated.emit("   -> Entraînement terminé.")
             update_progress(100, "Terminé.")
 
-            # Ajouter les données de plot
             seg_results['plot_data'] = {'y_test': y_s_test, 'predictions': seg_results['predictions']}
             return seg_results
 
@@ -434,7 +361,6 @@ class AppController(QObject):
         
         _ = self._run_in_thread(_balance_data, _on_balanced)
 
-    # --- 2. EXTRACTION DE CARACTÉRISTIQUES (optimisée) ---
     @_require_data
     def run_feature_extraction(self, config: dict) -> Optional[WorkerThread]:
         """
@@ -442,21 +368,17 @@ class AppController(QObject):
         et retournant un worker pour le suivi de la progression.
         """
         df_hash = str(hash(self.original_df.values.tobytes()))
-        
-        # 1. Vérifier le cache d'abord
+    
         cached_features = self._get_cached_features(df_hash, config)
         if cached_features is not None:
             self.feature_matrix = cached_features
             self.last_feature_config = config
             self.status_updated.emit(f"Features récupérées du cache. {cached_features.shape[1]} caractéristiques.")
             self.feature_extraction_finished.emit(cached_features)
-            # Pas de tâche longue, on retourne None pour que l'UI n'affiche pas de dialogue
             return None
 
-        # 2. Si pas de cache, préparer la tâche qui sera exécutée dans le thread
         def _extract_task(update_progress: Callable, is_cancelled: Callable):
             """Cette fonction locale accepte maintenant les callbacks."""
-            # On passe les callbacks à la fonction d'extraction du module feature_extractor
             features = extract_features(
                 self.original_df.copy(), 
                 config,
@@ -609,10 +531,8 @@ class AppController(QObject):
         """
         df_with_target = self.original_df.copy()
 
-        # Le param 'use_binary_mode' viendra de notre checkbox dans l'UI
         if params.get('use_binary_mode', False):
             self.status_updated.emit("Création d'une cible binaire ('Calm' vs 'Actif')...")
-            # On appelle la fonction qui transforme 'High'/'Low' en 'Calm'/'Actif'
             return create_binary_target(df_with_target, positive_class_name='Actif')
 
         elif params.get('use_cycle_target', False):
@@ -623,7 +543,6 @@ class AppController(QObject):
                 post_event_ratio=params.get('post_event_ratio', 0.2)
             )
         else:
-            # Fallback si aucune option n'est cochée : utiliser les données telles quelles
             return df_with_target
 
     def _align_features_and_labels(self, df_with_target: pd.DataFrame) -> tuple:
@@ -699,13 +618,13 @@ class AppController(QObject):
             nn_learning_rate=params['model_params']['nn_learning_rate']
         )
         
-        # Dans la méthode _execute_training de AppController
+
         trainer_map = {
-            "Neural Network": train_and_evaluate_nn, # <-- AJOUTEZ CETTE LIGNE
+            "Neural Network": train_and_evaluate_nn, 
             "K-Nearest Neighbors (KNN)": train_and_evaluate_knn,
             "Random Forest": train_and_evaluate_rf,
             "LightGBM": train_and_evaluate_lgbm,
-            #"LSTM (Physics-Guided)": train_and_evaluate_lstm_pinn, # <-- AJOUTEZ CETTE LIGNE
+
 
         }
         
@@ -717,20 +636,18 @@ class AppController(QObject):
             model_config, sample_weight=sample_weights
         )
         
-        # Les données de plot sont gérées dans _train_model, on retourne juste les résultats ici
         return results
 
     def _prepare_plot_data(self, X_train, X_val, X_test, y_test):
         """Prépare les données pour les graphiques"""
         return {
             'train_df': self.original_df[self.original_df['Date'].isin(X_train.index)],
-            'val_df': self.original_df[self.original_df['Date'].isin(X_val.index)], # <-- LA CLÉ MANQUANTE EST AJOUTÉE ICI
+            'val_df': self.original_df[self.original_df['Date'].isin(X_val.index)],
             'test_df': self.original_df[self.original_df['Date'].isin(X_test.index)],
             'y_test': y_test
         }
 
 
-    # Dans app_controller.py, REMPLACEZ la méthode _on_training_complete
 
     def _on_training_complete(self, results: dict):
         """Callback appelé à la fin de l'entraînement."""
@@ -739,22 +656,21 @@ class AppController(QObject):
         model = results.get('model')
         plot_data = results.get('plot_data')
         
-        # --- CORRECTION DE L'INITIALISATION DE L'EXPLAINER ---
         if model and plot_data and not plot_data['train_df'].empty:
-            # On ne crée un explainer que pour les modèles compatibles (non-Keras)
+            
             if not isinstance(model, KerasModel):
                 X_train = self.feature_matrix.loc[plot_data['train_df']['Date']]
-                # On récupère le jeu de test X à partir de l'index de y_test
+                
                 X_test_shap = self.feature_matrix.loc[plot_data['y_test'].index]
                 background_sample = X_train.sample(min(100, len(X_train)), random_state=self.config.RANDOM_STATE)
                 
-                # On passe maintenant X_test_shap comme troisième argument
+        
                 self.current_explainer = ModelExplainer(model, background_sample, X_test_shap)
             else:
                 self.current_explainer = None
         else:
             self.current_explainer = None
-        # --- FIN DE LA CORRECTION ---
+        
             
         self.status_updated.emit("Entraînement terminé avec succès.")
         self.training_finished.emit(results)
@@ -767,17 +683,16 @@ class AppController(QObject):
             return
 
         try:
-            # --- CORRECTION : APPEL À LA NOUVELLE MÉTHODE ---
-            # On appelle la méthode qui utilise les valeurs pré-calculées
+
             shap_values, base_value, instance_data = self.current_explainer.explain_instance_by_index(data_index)
-            # --- FIN DE LA CORRECTION ---
+            
             
             class_names = self.current_explainer.model.classes_.tolist()
             self.explanation_ready.emit(shap_values, base_value, instance_data, class_names)
 
         except Exception as e:
             self.error_occurred.emit("Erreur d'Explication", f"Impossible de générer l'explication SHAP : {e}")
-# --- 4. GESTION/COMPARAISON DE MODÈLES (MÉTHODES MANQUANTES) ---
+
     def refresh_model_lists(self):
         """Met à jour les listes de modèles dans l'UI."""
         try:
@@ -791,7 +706,7 @@ class AppController(QObject):
             self.error_occurred.emit("Avertissement", "Veuillez sélectionner deux modèles.")
             return
         try:
-            # Cette opération est rapide, pas besoin de thread
+            
             report_a = load_model_report(model_a_name)
             report_b = load_model_report(model_b_name)
             if report_a and report_b:
@@ -804,7 +719,7 @@ class AppController(QObject):
     def show_leaderboard(self):
         """Affiche le classement des modèles basé sur le F1-score macro."""
         try:
-            # Cette opération est aussi très rapide
+    
             reports = [load_model_report(name) for name in list_saved_models() if load_model_report(name)]
             sorted_reports = sorted(reports, key=lambda r: r['report'].get('macro avg', {}).get('f1-score', 0), reverse=True)
             self.leaderboard_ready.emit(sorted_reports)
@@ -812,11 +727,11 @@ class AppController(QObject):
             self.error_occurred.emit("Erreur Leaderboard", str(e))
 
 
-    # --- 5. PRÉDICTION EXTERNE (MÉTHODES MANQUANTES) ---
+
     def load_external_data(self, filepath: str) -> WorkerThread:
         """Charge un jeu de données externe et retourne le worker."""
 
-        # Tâche pour le thread
+        
         def _load_external_task(update_progress: Callable, is_cancelled: Callable):
             update_progress(10, "Ouverture du fichier externe...")
             df = load_data(filepath)
@@ -824,18 +739,15 @@ class AppController(QObject):
             update_progress(100, "Fichier chargé.")
             return df, filepath.split('/')[-1]
 
-        # Callback qui s'exécute à la fin
+    
         def _on_loaded(result):
             df, filename = result
             self.external_df = df
             self.external_data_loaded.emit(f"Fichier externe chargé : {filename}")
 
-        # Appel unique et correct à la fin
+        
         return self._run_in_thread(_load_external_task, _on_loaded)
 
-    # Dans app_controller.py
-    # Dans app_controller.py
-        # Dans app_controller.py, REMPLACEZ la fonction run_external_prediction existante
 
     def run_external_prediction(self, model_name: str, replicate_test_set: bool, test_set_percentage: int):
         """
@@ -852,14 +764,14 @@ class AppController(QObject):
         def _predict(update_progress: Callable, is_cancelled: Callable) -> Optional[pd.DataFrame]:
             update_progress(10, f"Chargement du paquet modèle '{model_name}'...")
             
-            # load_model_and_config retourne maintenant un "paquet"
+        
             model_package, config = load_model_and_config(model_name)
             if not model_package or not config:
                 raise ValueError("Impossible de charger le paquet modèle ou sa configuration.")
             
             model = model_package['model']
             
-            # Déterminer les données à utiliser
+        
             df_for_prediction = self.original_df if replicate_test_set else self.external_df
             if replicate_test_set:
                 num_rows = len(df_for_prediction)
@@ -868,13 +780,13 @@ class AppController(QObject):
             
             prediction_series = None
 
-            # --- DÉCISION : S'agit-il d'un classifieur ou de notre LSTM ? ---
+            
             if 'scalers' in model_package:
-                # --- CHEMIN B : LOGIQUE POUR LE LSTM (PINN) ---
+                
                 update_progress(30, "Modèle LSTM détecté. Préparation des séquences...")
                 
                 scalers = model_package['scalers']
-                sequence_length = model.input_shape[1] # Récupérer la longueur de séquence du modèle
+                sequence_length = model.input_shape[1] 
                 
                 X_seq, _, indices = create_sequences(df_for_prediction, sequence_length)
                 
@@ -890,7 +802,7 @@ class AppController(QObject):
                 prediction_series = pd.Series(y_pred_labels, index=indices, name='Prediction')
 
             else:
-                # --- CHEMIN A : LOGIQUE POUR LES CLASSIFIEURS (INCHANGÉE) ---
+                
                 update_progress(30, "Modèle classifieur détecté. Extraction des features...")
                 
                 feature_config = config['training_config']['feature_config']
@@ -903,7 +815,7 @@ class AppController(QObject):
                 
                 prediction_series = pd.Series(predictions, index=model_input_features.index, name='Prediction')
 
-            # --- ASSEMBLAGE FINAL (COMMUN AUX DEUX CHEMINS) ---
+    
             update_progress(95, "Assemblage des résultats finaux...")
             results_df = df_for_prediction.set_index('Date').copy()
             results_df = results_df.join(prediction_series)
@@ -917,7 +829,7 @@ class AppController(QObject):
 
         return self._run_in_thread(_predict, _on_predicted)
 
-    # --- 4-6. AUTRES MÉTHODES (optimisations légères) ---
+    
     def save_current_model(self, model_name: str):
         """Sauvegarde optimisée avec validation"""
         if not self._validate_model_save(model_name):
@@ -926,9 +838,8 @@ class AppController(QObject):
         self.status_updated.emit(f"Sauvegarde du modèle '{model_name}'...")
 
         def _save_model(update_progress, is_cancelled):
-            # On peut même ajouter un petit message de statut pour la cohérence
             update_progress(50, "Écriture des fichiers sur le disque...")
-            if is_cancelled(): return False # Vérification de l'annulation (bonne pratique)
+            if is_cancelled(): return False 
 
             success = save_model(model_name, self.last_training_results, self.last_feature_config)
             
@@ -1093,7 +1004,7 @@ class AppController(QObject):
         et émet les nouveaux résultats.
         """
         if self.current_explainer is None:
-            return # Pas d'explainer chargé
+            return 
 
         model_features = self.current_explainer.model.feature_names_in_
         modified_instance = modified_instance.reindex(columns=model_features, fill_value=0)
@@ -1103,5 +1014,6 @@ class AppController(QObject):
         class_names = self.current_explainer.model.classes_.tolist()
         
         self.explanation_ready.emit(shap_values, base_value, instance_data, class_names)
+
 
    
