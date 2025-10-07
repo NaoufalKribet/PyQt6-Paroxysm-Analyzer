@@ -590,7 +590,6 @@ class Bridge(QObject):
 
     @pyqtSlot(list)
     def receive_data(self, data):
-        # Cette méthode sera appelée depuis JavaScript
         self.parent()._handle_js_data(data)
 
 class MainWindow(QMainWindow):
@@ -652,19 +651,14 @@ class MainWindow(QMainWindow):
         
         self.status_label.setText("Bienvenue ! Veuillez charger un fichier pour commencer.")
 
-
-    # Dans main2.py, REMPLACEZ cette fonction
-
     def create_scenario_tab(self):
         self.scenario_tab = QWidget()
         main_layout = QHBoxLayout(self.scenario_tab)
 
-        # --- PANNEAU DE GAUCHE : CONTRÔLE SIMPLIFIÉ ---
         left_panel = QGroupBox("Pilote du Scénario 'What-If'")
         left_panel.setMaximumWidth(400)
         left_layout = QFormLayout(left_panel)
 
-        # Remplacer le ComboBox par un simple QLabel
         self.scenario_model_label = QLabel("Aucun modèle entraîné")
         self.scenario_model_label.setStyleSheet("font-weight: bold;")
         
@@ -672,9 +666,8 @@ class MainWindow(QMainWindow):
         self.scenario_data_selector.addItems(["Utiliser le jeu de test actuel", "Utiliser le jeu de validation actuel"])
         self.analyze_scenario_btn = QPushButton("Analyser ce Scénario")
         self.analyze_scenario_btn.setProperty("class", "primary")
-        self.analyze_scenario_btn.setEnabled(False) # Désactivé au début
+        self.analyze_scenario_btn.setEnabled(False) 
 
-        # Ajout d'un texte d'aide clair
         help_text = QLabel(
             "<b><u>Comment ça marche ?</u></b><br>"
             "1. Utilisez les outils <b>Lasso</b> ou <b>Box Select</b> dans la barre d'outils du graphique ci-dessus.<br>"
@@ -688,9 +681,8 @@ class MainWindow(QMainWindow):
         left_layout.addRow("Modèle Actif :", self.scenario_model_label)
         left_layout.addRow("Données de base :", self.scenario_data_selector)
         left_layout.addRow(self.analyze_scenario_btn)
-        left_layout.addRow(help_text) # Ajout du widget d'aide
+        left_layout.addRow(help_text) 
 
-        # --- PANNEAU DE DROITE : LABORATOIRE (INCHANGÉ) ---
         right_panel = QGroupBox("Laboratoire de Scénarios")
         right_layout = QVBoxLayout(right_panel)
         self.scenario_editor_canvas = QWebEngineView()
@@ -715,14 +707,11 @@ class MainWindow(QMainWindow):
             self._show_message_box("Erreur", "Veuillez entrer un nom de label valide et un intervalle de probabilité correct (min < max).")
             return
 
-        # Ajouter ou mettre à jour la règle
         self.ephemeral_label_rules[label_name] = (prob_min, prob_max)
         
-        # Mettre à jour la liste dans l'UI
         self.ephemeral_labels_list.clear()
         self.ephemeral_labels_list.addItems(self.ephemeral_label_rules.keys())
 
-        # Déclencher un recalcul global
         self._recalculate_and_redraw_all()
 
     def _remove_ephemeral_label(self):
@@ -734,11 +723,9 @@ class MainWindow(QMainWindow):
         if label_to_remove in self.ephemeral_label_rules:
             del self.ephemeral_label_rules[label_to_remove]
 
-        # Mettre à jour la liste dans l'UI
         self.ephemeral_labels_list.clear()
         self.ephemeral_labels_list.addItems(self.ephemeral_label_rules.keys())
         
-        # Déclencher un recalcul global
         self._recalculate_and_redraw_all()
 
     def _recalculate_and_redraw_all(self):
@@ -746,7 +733,6 @@ class MainWindow(QMainWindow):
         if not self.last_training_results_for_tuning:
             return
 
-        # On utilise le seuil actuel du slider principal
         slider_value = self.threshold_slider.value()
         self._update_predictions_with_threshold(slider_value)
     
@@ -806,17 +792,13 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(right_panel, 1)
 
         self.tabs.addTab(self.seg_tab, "4. Segmentation Fine")
-    # Dans main2.py, REMPLACEZ cette fonction
 
     def create_xai_tab(self):
-        # 1. Créer le widget principal pour l'onglet
         self.xai_tab = QWidget()
         main_layout = QHBoxLayout(self.xai_tab)
         
-        # 2. Créer le splitter principal qui divise l'onglet en deux
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # 3. Créer le panneau de gauche
         left_panel = QGroupBox("Analyse d'une Prédiction Spécifique")
         left_layout = QVBoxLayout(left_panel)
         
@@ -828,13 +810,10 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(QLabel("1. Sélectionnez une prédiction dans le jeu de test :"))
         left_layout.addWidget(self.xai_data_table)
         left_layout.addWidget(self.explain_button)
-        
-        # 4. Créer le panneau de droite avec ses propres onglets internes
+    
         right_panel_group = QGroupBox("Résultats de l'Explication (SHAP)")
         right_panel_layout = QVBoxLayout(right_panel_group)
         right_tabs = QTabWidget()
-
-        # Onglet interne 1 : Explication Locale
         local_xai_tab = QWidget()
         local_xai_layout = QVBoxLayout(local_xai_tab)
         
@@ -848,7 +827,6 @@ class MainWindow(QMainWindow):
         local_xai_layout.addWidget(self.xai_waterfall_canvas)
         right_tabs.addTab(local_xai_tab, "Explication Locale")
 
-        # Onglet interne 2 : Explication Globale
         global_xai_tab = QWidget()
         global_xai_layout = QFormLayout(global_xai_tab)
         
@@ -863,21 +841,15 @@ class MainWindow(QMainWindow):
         global_xai_layout.addRow(self.xai_dependence_canvas)
         right_tabs.addTab(global_xai_tab, "Analyse de Dépendance (Globale)")
         
-        # Ajouter le QTabWidget de droite au layout du panneau de droite
         right_panel_layout.addWidget(right_tabs)
 
-        # 5. Ajouter les panneaux gauche et droite au splitter principal
         main_splitter.addWidget(left_panel)
-        main_splitter.addWidget(right_panel_group) # On ajoute le QGroupBox qui contient les onglets
+        main_splitter.addWidget(right_panel_group) 
         main_splitter.setSizes([450, 800])
         
-        # 6. Ajouter le splitter au layout principal de l'onglet
         main_layout.addWidget(main_splitter)
-        
-        # 7. --- LA LIGNE MANQUANTE ---
-        # Ajouter l'onglet principal au QTabWidget de la fenêtre
+    
         self.tabs.addTab(self.xai_tab, "7. Explicabilité (XAI)")
-        # --- FIN DE LA CORRECTION ---
 
     def create_data_tab(self):
         self.data_tab = QWidget()
@@ -924,16 +896,15 @@ class MainWindow(QMainWindow):
         graph_group = QGroupBox("Aperçu des Données")
         graph_group.setMinimumHeight(250)  
         graph_layout = QVBoxLayout(graph_group)
-        graph_layout.setContentsMargins(8, 15, 8, 8)  # Marges internes
+        graph_layout.setContentsMargins(8, 15, 8, 8) 
         
         self.overview_canvas = QWebEngineView()
         self.overview_canvas.setMinimumHeight(200)
         graph_layout.addWidget(self.overview_canvas)
         
-        # Groupe statistiques (taille optimisée)
         stats_group = QGroupBox("Statistiques Descriptives")
         stats_group.setMinimumHeight(150)
-        stats_group.setMaximumHeight(200)  # Limite la hauteur
+        stats_group.setMaximumHeight(200)  
         stats_layout = QVBoxLayout(stats_group)
         stats_layout.setContentsMargins(8, 15, 8, 8)
         
@@ -949,24 +920,21 @@ class MainWindow(QMainWindow):
         )
         stats_layout.addWidget(self.stats_text)
         
-        # Assemblage du panneau droit avec proportions définies
         right_layout.addWidget(graph_group, 2)  # 2/3 de l'espace
         right_layout.addWidget(stats_group, 1)   # 1/3 de l'espace
         
         main_splitter.addWidget(right_panel)
-        main_splitter.setSizes([450, 550])  # Proportions initiales optimisées
+        main_splitter.setSizes([450, 550]) 
         
-        # --- Panneau du bas : Configuration compacte ---
         bottom_widget = QWidget()
-        bottom_widget.setMaximumHeight(120)  # Hauteur réduite et fixe
+        bottom_widget.setMaximumHeight(120)  
         config_layout = QHBoxLayout(bottom_widget)
         config_layout.setSpacing(12)
         config_layout.setContentsMargins(0, 8, 0, 0)
         
-        # Groupe d'équilibrage (compact)
         balancing_groupbox = QGroupBox("Équilibrage (Ancienne Méthode)")
-        balancing_groupbox.setMaximumWidth(280)  # Largeur fixe
-        form_layout = QVBoxLayout(balancing_groupbox)  # VBox au lieu de Form pour plus de compacité
+        balancing_groupbox.setMaximumWidth(280)  
+        form_layout = QVBoxLayout(balancing_groupbox)  
         form_layout.setSpacing(5)
         form_layout.setContentsMargins(8, 15, 8, 8)
         
@@ -976,15 +944,13 @@ class MainWindow(QMainWindow):
         
         form_layout.addWidget(self.cb_bal)
         form_layout.addWidget(self.btn_bal)
-        form_layout.addStretch()  # Pousse vers le haut
+        form_layout.addStretch() 
         
-        # Groupe de définition de la cible (optimisé)
         self.target_groupbox = QGroupBox("Définition de la Cible pour l'Entraînement")
         target_layout = QVBoxLayout(self.target_groupbox)
         target_layout.setSpacing(4)
         target_layout.setContentsMargins(8, 15, 8, 8)
         
-        # Options radio avec tooltips raccourcis
         self.rb_binary_mode = QRadioButton("Classification Binaire (Mode Détecteur)")
         self.rb_binary_mode.setToolTip("Approche recommandée : 'Calm' vs 'Actif'")
         
@@ -992,13 +958,11 @@ class MainWindow(QMainWindow):
         self.rb_multiclass_mode.setToolTip("Approche avancée : Segmentation fine des événements")
         self.rb_multiclass_mode.setChecked(True)
         
-        # Widget conteneur pour les ratios (layout horizontal pour gagner de l'espace)
         self.multiclass_options_widget = QWidget()
         multiclass_layout = QHBoxLayout(self.multiclass_options_widget)
         multiclass_layout.setContentsMargins(15, 0, 0, 0)
         multiclass_layout.setSpacing(10)
-        
-        # Spinboxes avec labels compacts
+    
         pre_label = QLabel("Précurseurs:")
         self.pre_event_ratio_spin = QDoubleSpinBox()
         self.pre_event_ratio_spin.setRange(0.0, 1.0)
@@ -1019,26 +983,22 @@ class MainWindow(QMainWindow):
         multiclass_layout.addWidget(self.post_event_ratio_spin)
         multiclass_layout.addStretch()
         
-        # Assemblage du groupe cible
         target_layout.addWidget(self.rb_binary_mode)
         target_layout.addWidget(self.rb_multiclass_mode)
         target_layout.addWidget(self.multiclass_options_widget)
         
-        # Logique de visibilité
         def on_target_mode_changed():
             self.multiclass_options_widget.setVisible(self.rb_multiclass_mode.isChecked())
         
         self.rb_binary_mode.toggled.connect(on_target_mode_changed)
         self.rb_multiclass_mode.toggled.connect(on_target_mode_changed)
         
-        # Assemblage final avec proportions
-        config_layout.addWidget(balancing_groupbox, 0)  # Taille fixe
-        config_layout.addWidget(self.target_groupbox, 1)  # Prend l'espace restant
-        
-        # Assemblage du layout principal
-        main_layout.addWidget(top_widget, 0)      # Hauteur fixe
-        main_layout.addWidget(main_splitter, 1)   # Prend tout l'espace disponible
-        main_layout.addWidget(bottom_widget, 0)   # Hauteur fixe
+        config_layout.addWidget(balancing_groupbox, 0)  
+        config_layout.addWidget(self.target_groupbox, 1)  
+    
+        main_layout.addWidget(top_widget, 0)      
+        main_layout.addWidget(main_splitter, 1)   
+        main_layout.addWidget(bottom_widget, 0)   
         
         self.tabs.addTab(self.data_tab, "1. Gestion Données")
     def create_feature_tab(self):
@@ -1046,7 +1006,7 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(self.feature_tab)
         h_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # --- Panneau de Gauche (Configuration) ---
+        
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         
@@ -1062,32 +1022,32 @@ class MainWindow(QMainWindow):
         features_group = QGroupBox("Caractéristiques à Générer")
         features_layout = QVBoxLayout(features_group)
         self.feature_list_widget = QListWidget()
-        # On popule la liste à partir de la variable stockée
+        
         self.feature_list_widget.addItems(self.default_features)
         self.feature_list_widget.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
-        # Sélectionner tout par défaut au démarrage
+       
         for i in range(self.feature_list_widget.count()): 
             self.feature_list_widget.item(i).setSelected(True)
         features_layout.addWidget(self.feature_list_widget)
 
-        # --- GROUPE D'ACTIONS AMÉLIORÉ ---
+ 
         actions_group = QGroupBox("Actions")
         actions_layout = QVBoxLayout(actions_group)
 
-        # Widget "Tout sélectionner"
+   
         self.select_all_cb = QCheckBox("Tout sélectionner / désélectionner")
-        self.select_all_cb.setChecked(True) # Coché par défaut
+        self.select_all_cb.setChecked(True)
         
-        # Widget "Restaurer la liste"
+    
         self.restore_features_btn = QPushButton("Restaurer la liste complète")
 
-        self.select_nn_preset_btn = QPushButton("Preset pour Réseau de Neurones (NN)") # <-- NOUVEAU BOUTON
+        self.select_nn_preset_btn = QPushButton("Preset pour Réseau de Neurones (NN)") # 
         self.select_nn_preset_btn.setToolTip("Sélectionne un sous-ensemble de features robustes, idéal pour les NN.")
 
         actions_layout.addWidget(self.select_nn_preset_btn)
         
 
-        # Widget "Sélectionner les N meilleures"
+       
         top_n_layout = QHBoxLayout()
         self.top_n_spin = QSpinBox()
         self.top_n_spin.setRange(1, len(self.default_features))
@@ -1099,23 +1059,23 @@ class MainWindow(QMainWindow):
         top_n_layout.addWidget(self.top_n_spin)
         top_n_layout.addWidget(self.select_top_n_btn)
 
-        # Widgets existants
+      
         self.norm_cb = QCheckBox("Normaliser les caractéristiques (pour entraînement)")
         self.norm_cb.setChecked(True)
         self.gen_btn = QPushButton("Générer et Analyser les Caractéristiques")
         
-        # Ajout de tous les widgets au layout d'actions
+     
         actions_layout.addWidget(self.select_all_cb)
         actions_layout.addWidget(self.restore_features_btn)
         actions_layout.addLayout(top_n_layout)
-        actions_layout.addSpacing(15) # Ajoute un séparateur visuel
+        actions_layout.addSpacing(15) 
         actions_layout.addWidget(self.norm_cb)
         actions_layout.addWidget(self.gen_btn)
 
-        actions_layout.addWidget(self.select_nn_preset_btn) # <-- AJOUTEZ LE BOUTON AU LAYOUT
+        actions_layout.addWidget(self.select_nn_preset_btn) 
 
 
-        # --- Assemblage final du panneau de gauche ---
+       
         left_layout.addWidget(win_group)
         left_layout.addWidget(features_group)
         left_layout.addWidget(actions_group)
@@ -1130,7 +1090,7 @@ class MainWindow(QMainWindow):
         indiv_layout.addWidget(self.feature_dist_canvas); indiv_layout.addWidget(self.feature_boxplot_canvas)
         v_splitter.addWidget(indiv_group)
         corr_group = QGroupBox("Matrice de Corrélation Globale"); corr_layout = QVBoxLayout(corr_group)
-        self.corr_matrix_canvas = QWebEngineView() # Remplacement de MplCanvas
+        self.corr_matrix_canvas = QWebEngineView() 
         corr_layout.addWidget(self.corr_matrix_canvas)
         v_splitter.addWidget(corr_group)
         right_layout.addWidget(v_splitter); right_panel.setLayout(right_layout)
@@ -1185,7 +1145,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(model_selection_group); left_layout.addWidget(split_config_group); left_layout.addWidget(params_group); left_layout.addWidget(weighting_group); left_layout.addLayout(buttons_layout); left_layout.addWidget(results_group); left_layout.addWidget(save_group); left_layout.addStretch()
 
         
-        # --- PANNEAU DE DROITE : MAINTENANT AVEC QTabWidget ET QWebEngineView ---
+     
         right_tabs = QTabWidget()
 
         self.main_plot_canvas = QWebEngineView()
@@ -1209,7 +1169,7 @@ class MainWindow(QMainWindow):
         threshold_layout = QFormLayout(threshold_group)
         self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self.threshold_slider.setRange(1, 99); self.threshold_slider.setValue(50)
-        self.threshold_slider.setEnabled(False) # Désactivé au début
+        self.threshold_slider.setEnabled(False)
         self.threshold_value_label = QLabel("Seuil : 0.50")
         self.threshold_metrics_label = QLabel("Précision: N/A | Rappel: N/A")
         
@@ -1265,7 +1225,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.training_tab, "3. Entraînement")
 
 
-    # Dans main2.py, REMPLACEZ cette fonction
+   
 
     def update_permutation_importance_plot(self, results):
         """
@@ -1294,19 +1254,17 @@ class MainWindow(QMainWindow):
         model_feature_names = model.feature_names_in_
         X_test = self.feature_matrix_for_analysis.loc[y_test.index].reindex(columns=model_feature_names, fill_value=0)
 
-        # --- CORRECTION DÉFINITIVE ---
-        # 1. Identifier la classe positive par son nom (celle qui n'est pas 'Calm')
+     
         positive_class_name = next((label for label in y_test.unique() if label != 'Calm'), None)
         
         if not positive_class_name:
             self._clear_plotly_view(self.permutation_importance_canvas, "Impossible de trouver une classe positive ('Actif', 'Pre-Event'...)")
             return
             
-        # 2. Créer un scorer qui se concentre UNIQUEMENT sur cette classe en utilisant son nom
+      
         scorer_to_use = make_scorer(f1_score, pos_label=positive_class_name, zero_division=0)
         title = f"Importance par Permutation (Baisse du F1-Score de '{positive_class_name}')"
-        # --- FIN DE LA CORRECTION ---
-
+    
         try:
             self.status_label.setText(f"Calcul de l'importance par permutation (cible: {positive_class_name})...")
             QApplication.processEvents()
@@ -1341,7 +1299,7 @@ class MainWindow(QMainWindow):
             import traceback
             traceback.print_exc()
 
-    # Dans main2.py, REMPLACEZ cette fonction
+   
 
     def update_dependence_plot(self):
         """
@@ -1381,11 +1339,7 @@ class MainWindow(QMainWindow):
             interaction_values = shap_values_positive[:, feature_index]
             color_bar_title = "Impact sur la prédiction (SHAP)"
         
-        # --- CORRECTION DÉFINITIVE DU FORMATAGE ---
-        # np.ravel() aplatit le tableau, et .tolist() le convertit en une liste Python pure.
-        # C'est la méthode la plus sûre pour s'assurer que nous avons des scalaires.
         text_values = np.ravel(interaction_values).tolist()
-        # --- FIN DE LA CORRECTION ---
 
         fig.add_trace(go.Scatter(
             x=X_test[feature],
@@ -1556,11 +1510,11 @@ class MainWindow(QMainWindow):
  
         self.pred_replicate_group = replicate_group
 
-        # Groupe 3 : Bouton de lancement
+   
         self.pred_run_button = QPushButton("LANCER PRÉDICTION")
         self.pred_run_button.setProperty("class", "primary")
 
-        # Assemblage du panneau de gauche
+      
         control_layout.addWidget(base_config_group)
         control_layout.addWidget(self.pred_replicate_group)
         control_layout.addStretch()
@@ -1568,7 +1522,6 @@ class MainWindow(QMainWindow):
         left_panel.setLayout(control_layout)
 
 
-        # --- PANNEAU DE DROITE : TABLEAU DE BORD DES RÉSULTATS (inchangé) ---
         right_panel = QGroupBox("Analyse de la Performance sur Données Externes")
         right_layout = QVBoxLayout(right_panel)
         self.pred_kpi_widget = QWidget()
@@ -1579,7 +1532,7 @@ class MainWindow(QMainWindow):
         plot_tab = QWidget()
         plot_layout = QVBoxLayout(plot_tab)
         self.pred_results_canvas = QWebEngineView()
-        #self.pred_confusion_matrix_canvas = QWebEngineView()
+   
         plot_layout.addWidget(self.pred_results_canvas)
         self.pred_results_tabs.addTab(plot_tab, "📈 Vue Temporelle")
         cm_tab = QWidget()
@@ -1594,7 +1547,6 @@ class MainWindow(QMainWindow):
         report_layout.addWidget(self.pred_report_text)
         self.pred_results_tabs.addTab(report_tab, "📄 Rapport Détaillé")
 
-        # Assemblage final
         main_layout.addWidget(left_panel)
         main_layout.addWidget(right_panel)
         
@@ -1603,18 +1555,15 @@ class MainWindow(QMainWindow):
         self.sim_tab = QWidget()
         main_layout = QHBoxLayout(self.sim_tab)
         
-        # --- PANNEAU DE GAUCHE : CONFIGURATION ET CONTRÔLE ---
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_panel.setMaximumWidth(400)
 
-        # Groupe de sélection du modèle
         model_group = QGroupBox("1. Sélection du Modèle")
         model_layout = QFormLayout(model_group)
         self.sim_model_combo = QComboBox()
         model_layout.addRow("Modèle à utiliser:", self.sim_model_combo)
 
-        # Groupe de génération de données
         gen_group = QGroupBox("2. Configuration des Données Synthétiques")
         gen_layout = QFormLayout(gen_group)
         self.sim_duration_spin = QSpinBox()
@@ -1627,7 +1576,6 @@ class MainWindow(QMainWindow):
         gen_layout.addRow("Nombre d'événements:", self.sim_events_spin)
         gen_layout.addRow("Ratio d'événements longs:", self.sim_ratio_long_spin)
 
-        # Groupe de contrôle
         control_group = QGroupBox("3. Contrôles de la Simulation")
         control_layout = QHBoxLayout(control_group)
         self.sim_start_button = QPushButton("DÉMARRER")
@@ -1644,7 +1592,6 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(control_group)
         left_layout.addStretch()
 
-        # --- PANNEAU DE DROITE : VISUALISATION ---
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         
@@ -1676,13 +1623,9 @@ class MainWindow(QMainWindow):
             'ratio_long_events': self.sim_ratio_long_spin.value()
         }
 
-        # Lancer la tâche et récupérer le worker
         worker = self.controller.start_simulation(params)
-
-        # VÉRIFIER si le worker a bien été créé
         if worker:
             dialog = ProcessingDialog("Préparation de la Simulation", self)
-            # Connexions communes
             worker.progress_updated.connect(dialog.update_progress)
             dialog.cancelled.connect(worker.cancel)
             worker.finished.connect(dialog.task_finished)
@@ -1696,8 +1639,6 @@ class MainWindow(QMainWindow):
         if self.current_scenario_df is not None:
             modified_df = self.current_scenario_df.copy()
             modified_df['VRP'] = data
-            
-            # Utilise le nom du modèle actuellement affiché
             model_name = self.scenario_model_label.text()
             self.controller.run_whatif_analysis(model_name, modified_df)
 
@@ -1729,11 +1670,9 @@ class MainWindow(QMainWindow):
         fig.update_layout(
             title="Éditeur de Scénario VRP (utilisez les outils 'lasso' ou 'box select' pour éditer)",
             template='plotly_dark',
-            dragmode='lasso' # Active le mode sélection par défaut
+            dragmode='lasso' 
         )
         
-        # --- C'EST LA PARTIE MAGIQUE ---
-        # On rend le graphique éditable
         fig.layout.template.data.scatter = [go.Scatter(selected=go.scatter.Selected(marker=dict(color='yellow')))]
         
         html = fig.to_html(
@@ -1777,12 +1716,9 @@ class MainWindow(QMainWindow):
             metrics_df = results_df.dropna(subset=['Prediction', 'Ramp'])
             y_true = metrics_df['Ramp']
             y_pred = metrics_df['Prediction']
-            
-            # Affichage du rapport textuel
             report = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
             self.pred_report_text.setText(json.dumps(report, indent=2))
             
-            # Matrice de confusion avec Plotly
             class_names = sorted(list(set(y_true) | set(y_pred)))
             cm = confusion_matrix(y_true, y_pred, labels=class_names)
             fig_cm = ff.create_annotated_heatmap(z=cm, x=class_names, y=class_names, colorscale='Blues')
@@ -1792,7 +1728,6 @@ class MainWindow(QMainWindow):
             self.pred_report_text.clear()
             self.pred_confusion_matrix_canvas.setHtml("")
 
-        # Graphique temporel avec Plotly
         fig_plot = go.Figure()
         fig_plot.add_trace(go.Scatter(x=results_df['Date'], y=results_df['VRP'], mode='markers', name='VRP Data', marker=dict(size=3, color='grey')))
         
@@ -1824,21 +1759,16 @@ class MainWindow(QMainWindow):
         y_test = results['plot_data']['y_test']
         class_names = results['class_names']
 
-        # --- LOGIQUE DE CLASSIFICATION MODULAIRE (INCHANGÉE) ---
         positive_class_name = next((c for c in class_names if c != 'Calm'), 'Actif')
         positive_class_index = class_names.index(positive_class_name)
         prob_positive = probabilities[:, positive_class_index]
         
-        # 1. Prédiction binaire de base
         final_predictions = np.where(prob_positive >= threshold, positive_class_name, 'Calm')
         
-        # 2. Re-catégorisation avec les règles éphémères
         for label_name, (prob_min, prob_max) in self.ephemeral_label_rules.items():
             mask = (prob_positive >= prob_min) & (prob_positive < prob_max)
             final_predictions[mask] = label_name
         
-        # --- NOUVELLE LOGIQUE D'ÉVALUATION ---
-        # 3. L'évaluation quantitative se fait TOUJOURS sur la décision binaire 'Actif' vs 'Calm'
         y_test_binary = np.where(y_test == 'Calm', 'Calm', 'Actif')
         y_pred_binary_for_metrics = np.where(final_predictions == 'Calm', 'Calm', 'Actif')
         
@@ -1846,11 +1776,8 @@ class MainWindow(QMainWindow):
         recall = recall_score(y_test_binary, y_pred_binary_for_metrics, pos_label='Actif', zero_division=0)
         self.threshold_metrics_label.setText(f"Précision ('Actif'): {precision:.2f} | Rappel ('Actif'): {recall:.2f}")
         
-        # 4. On met à jour le GRAPHIQUE DES MÉTRIQUES uniquement avec les vraies classes
         base_report = classification_report(y_test, np.where(prob_positive >= threshold, positive_class_name, 'Calm'), output_dict=True, zero_division=0)
         self.update_metrics_plot({'report': base_report})
-        
-        # 5. On passe les prédictions FINALES (avec labels éphémères) au graphique principal pour la VISUALISATION
         self.update_main_plot(y_test, final_predictions)
         
     @pyqtSlot(dict)
@@ -1860,17 +1787,14 @@ class MainWindow(QMainWindow):
         self.sim_stop_button.setEnabled(True)
         self.sim_model_combo.setEnabled(False)
 
-        # Stocker les données complètes
         self.sim_all_dates = pd.to_datetime(init_data['dates'])
         self.sim_all_vrp = np.array(init_data['vrp'])
         self.sim_all_truth = np.array(init_data['true_labels'])
         self.sim_model_classes = init_data['model_classes']
 
-        # Initialiser les données pour les plots
         self.sim_predictions = np.empty(len(self.sim_all_dates), dtype=object)
         self.sim_probabilities = np.zeros((len(self.sim_all_dates), len(self.sim_model_classes)))
 
-        # Vider les canvas au début
         self.simulation_vrp_canvas.setHtml("")
         self.simulation_prob_canvas.setHtml("")
 
@@ -1878,28 +1802,23 @@ class MainWindow(QMainWindow):
     def update_simulation_plots(self, step_data):
         idx = step_data['index']
         
-        # Mettre à jour les données de simulation
         self.sim_predictions[idx] = step_data['prediction']
         self.sim_probabilities[idx, :] = step_data['probabilities']
         
-        # Définir la fenêtre de visualisation
         view_window = 200
         start_idx = max(0, idx - view_window)
         end_idx = idx + 1
         
         dates_view = self.sim_all_dates[start_idx:end_idx]
         
-        # --- Graphique 1 : VRP et Prédictions ---
         fig_vrp = go.Figure()
         fig_vrp.add_trace(go.Scatter(x=dates_view, y=self.sim_all_vrp[start_idx:end_idx], mode='lines+markers', name='VRP', line=dict(color='grey')))
         
         label_map = {'Calm': 0, 'Pre-Event': 1, 'High-Paroxysm': 2, 'Post-Event': -1, 'Actif': 1, 'Low':0}
         
-        # Vraie nature
         true_labels_numeric = [label_map.get(l, -2) for l in self.sim_all_truth[start_idx:end_idx]]
         fig_vrp.add_trace(go.Scatter(x=dates_view, y=true_labels_numeric, mode='markers', name='Vraie Nature', marker=dict(color='deepskyblue', symbol='circle-open')))
         
-        # Prédictions
         pred_labels_numeric = [label_map.get(l, -2) for l in self.sim_predictions[start_idx:end_idx] if l is not None]
         pred_dates = dates_view[:len(pred_labels_numeric)]
         fig_vrp.add_trace(go.Scatter(x=pred_dates, y=pred_labels_numeric, mode='markers', name='Prédiction', marker=dict(color='red', symbol='x', size=10)))
@@ -1907,7 +1826,6 @@ class MainWindow(QMainWindow):
         fig_vrp.update_layout(title=f"Simulation en Temps Réel (Point {idx})", template='plotly_dark', yaxis_title="VRP / État")
         self.simulation_vrp_canvas.setHtml(fig_vrp.to_html(include_plotlyjs='cdn'))
         
-        # --- Graphique 2 : Probabilités ---
         fig_prob = go.Figure()
         for i, class_name in enumerate(self.sim_model_classes):
             fig_prob.add_trace(go.Scatter(x=dates_view, y=self.sim_probabilities[start_idx:end_idx, i], mode='lines', name=f'P({class_name})'))
@@ -1923,8 +1841,6 @@ class MainWindow(QMainWindow):
         self.sim_model_combo.setEnabled(True)
         QMessageBox.information(self, "Simulation Terminée", message)
 
-    # Dans main2.py, ajoutez ces 3 nouvelles méthodes à la classe MainWindow
-
     @pyqtSlot(bool)
     def _toggle_all_features(self, checked):
         """Coche ou décoche tous les items de la liste de caractéristiques."""
@@ -1937,7 +1853,6 @@ class MainWindow(QMainWindow):
         """Restaure la liste de caractéristiques à son état d'origine."""
         self.feature_list_widget.clear()
         self.feature_list_widget.addItems(self.default_features)
-        # On resélectionne tout par défaut pour la commodité
         self.select_all_cb.setChecked(True)
         self._toggle_all_features(True)
         self._show_message_box("Succès", "La liste complète des caractéristiques a été restaurée.")
@@ -1956,19 +1871,16 @@ class MainWindow(QMainWindow):
             self._show_message_box("Info", "Le modèle actuel ne fournit pas d'importance de caractéristiques (ex: KNN).")
             return
 
-        # Récupérer les importances et les trier
         importances = model.feature_importances_
         names = model.feature_names_in_
         
         feature_importance_df = pd.DataFrame({'feature': names, 'importance': importances})
         feature_importance_df.sort_values(by='importance', ascending=False, inplace=True)
 
-        # Récupérer N et les N meilleurs noms
         n_to_select = self.top_n_spin.value()
         top_n_features = feature_importance_df['feature'].head(n_to_select).tolist()
 
-        # Mettre à jour la sélection dans l'UI
-        self._toggle_all_features(False) # D'abord, on désélectionne tout
+        self._toggle_all_features(False) 
         for i in range(self.feature_list_widget.count()):
             item = self.feature_list_widget.item(i)
             if item.text() in top_n_features:
@@ -1991,7 +1903,6 @@ class MainWindow(QMainWindow):
         self.select_top_n_btn.clicked.connect(self._select_top_n_features)
         # Dans la méthode _connect_signals de MainWindow
 
-# ... (après les autres connexions de l'onglet 2)
         self.select_nn_preset_btn.clicked.connect(self._select_nn_preset_features)
 
         # Onglet 3: Entraînement
@@ -2076,7 +1987,6 @@ class MainWindow(QMainWindow):
         worker = self.controller.load_data_from_file(filepath)
 
         if worker:
-            # --- CORRECTION : UTILISER LE NOUVEAU DIALOGUE ---
             image_path = "Core/BAHAHAHA/NINHO.png"
 
             # Créer le dialogue d'image
@@ -2086,10 +1996,9 @@ class MainWindow(QMainWindow):
             # Quand il a fini, il émet un signal qui ferme notre dialogue.
             worker.finished.connect(dialog.close)
             
-            # Lancer le dialogue. Il bloquera l'interface principale (ce qui est voulu)
+            # Il bloquera l'interface principale (ce qui est voulu)
             # et se fermera automatiquement quand le worker sera terminé.
             dialog.exec()
-            # --- FIN DE LA CORRECTION ---
     
     def _trigger_feature_extraction(self):
         config = {
@@ -2100,7 +2009,6 @@ class MainWindow(QMainWindow):
         # Lancer la tâche et récupérer le worker
         worker = self.controller.run_feature_extraction(config)
 
-        # AJOUT : Vérifier si le worker a bien été créé
         if worker:
             dialog = ProcessingDialog("Extraction des Caractéristiques", self)
             # Connexions communes
@@ -2116,7 +2024,6 @@ class MainWindow(QMainWindow):
         """
         self.clear_results()
         
-        # --- C'EST ICI QUE LE DICTIONNAIRE `params` EST CONSTRUIT ---
         
         params = {
             # Vient de la liste déroulante des modèles
@@ -2209,12 +2116,9 @@ class MainWindow(QMainWindow):
 
         dialog.exec()
             
-        # Dans main2.py, REMPLACEZ la fonction _trigger_run_external_prediction existante
 
     def _trigger_run_external_prediction(self):
         model_name = self.pred_model_combo.currentText()
-        
-        # Récupérer les nouvelles valeurs de l'interface
         replicate_test_set = self.pred_replicate_group.isChecked()
         test_set_percentage = self.pred_percentage_spin.value()
         
@@ -2300,10 +2204,6 @@ class MainWindow(QMainWindow):
         """
         self.feature_matrix_for_analysis = feature_matrix
         
-        # --- LES LIGNES SUIVANTES SONT SUPPRIMÉES ---
-        # self.feature_list_widget.clear()  <-- SUPPRIMÉ
-        # self.feature_list_widget.addItems(feature_matrix.columns) <-- SUPPRIMÉ
-        
         # Met à jour les graphiques et sélectionne le premier item pour l'affichage
         self.update_correlation_plot()
         if self.feature_list_widget.count() > 0:
@@ -2314,7 +2214,6 @@ class MainWindow(QMainWindow):
             else:
                 self.feature_list_widget.setCurrentRow(0)
             
-    # Dans main2.py, REMPLACEZ cette fonction
 
     @pyqtSlot(dict)
     def _handle_training_results(self, results):
@@ -2392,7 +2291,7 @@ class MainWindow(QMainWindow):
             combos_to_update = [self.model_a_combo, self.model_b_combo]
         elif current_tab_text == "5. Prédiction Externe":
             combos_to_update = [self.pred_model_combo]
-        elif current_tab_text == "6. Simulation Temps Réel": # <-- AJOUT
+        elif current_tab_text == "6. Simulation Temps Réel": 
             combos_to_update = [self.sim_model_combo]
 
         # Logique générique pour remplir les combos
@@ -2402,15 +2301,12 @@ class MainWindow(QMainWindow):
             combo.addItems(models)
             if current_selection in models:
                 combo.setCurrentText(current_selection)
-            
-    # Dans main2.py, REMPLACEZ cette fonction
 
     @pyqtSlot(dict, dict)
     def _display_comparison(self, report_a, report_b):
         self.comparison_tabs.setCurrentWidget(self.avsb_tab)
         model_a_name, model_b_name = report_a['model_name'], report_b['model_name']
         
-        # --- PARTIE 1 : Remplissage du tableau QTableWidget (inchangée) ---
         all_labels = sorted(list(set(report_a.get('report', {}).keys()) | set(report_b.get('report', {}).keys()) - {'accuracy', 'macro avg', 'weighted avg'}))
         metrics = ["f1-score", "precision", "recall"]
         
@@ -2438,7 +2334,6 @@ class MainWindow(QMainWindow):
                 
         self.comparison_table.resizeColumnsToContents()
 
-        # --- PARTIE 2 : Création du graphique radar avec Plotly (entièrement réécrite) ---
         radar_labels = [lbl.title() for lbl in all_labels]
         
         fig = go.Figure()
@@ -2446,7 +2341,6 @@ class MainWindow(QMainWindow):
         stats_a = [report_a.get('report', {}).get(lbl, {}).get('f1-score', 0) for lbl in all_labels]
         stats_b = [report_b.get('report', {}).get(lbl, {}).get('f1-score', 0) for lbl in all_labels]
         
-        # Ajouter la trace pour le modèle A
         fig.add_trace(go.Scatterpolar(
             r=stats_a,
             theta=radar_labels,
@@ -2454,7 +2348,6 @@ class MainWindow(QMainWindow):
             name=model_a_name
         ))
         
-        # Ajouter la trace pour le modèle B
         fig.add_trace(go.Scatterpolar(
             r=stats_b,
             theta=radar_labels,
@@ -2467,7 +2360,7 @@ class MainWindow(QMainWindow):
             polar=dict(
                 radialaxis=dict(
                     visible=True,
-                    range=[0, 1]  # Le score F1 est entre 0 et 1
+                    range=[0, 1]  
                 )
             ),
             showlegend=True,
@@ -2494,12 +2387,10 @@ class MainWindow(QMainWindow):
             self.leaderboard_table.setItem(row, 5, QTableWidgetItem(str(report['best_params'])))
         self.leaderboard_table.resizeColumnsToContents()
 
-    # Dans main2.py, REMPLACEZ cette fonction
 
     @pyqtSlot(int)
     def _on_scenario_tab_selected(self, index):
         if self.tabs.tabText(index) == "Scénarios (What-If)":
-            # Rafraîchit simplement l'éditeur avec les dernières données disponibles
             self._setup_scenario_editor()
 
     @pyqtSlot()
@@ -2643,7 +2534,6 @@ class MainWindow(QMainWindow):
         if 'best_threshold' in results:
             text += f"--- Seuil de Décision Optimal Trouvé ---\n"
             text += f"Le seuil qui maximise le F1-Score est : {results['best_threshold']:.2f}\n\n"
-    # --- FIN DE L'AJOUT -
         for cn, m in results['report'].items():
             if isinstance(m, dict): text += f"\nClasse: {cn}\n  Précision: {m['precision']:.4f}\n  Rappel: {m['recall']:.4f}\n  F1-Score: {m['f1-score']:.4f}\n"
         text += f"\n--- Scores Globaux ---\nMacro Avg F1: {results['report']['macro avg']['f1-score']:.4f}\nWeighted Avg F1: {results['report']['weighted avg']['f1-score']:.4f}\n"
@@ -2655,9 +2545,6 @@ class MainWindow(QMainWindow):
         fig.update_layout(title="Matrice de Confusion", template='plotly_dark')
         self._display_plotly_fig(self.confusion_matrix_canvas, fig)
 
-    # Dans main2.py, REMPLACEZ cette fonction
-
-    # Dans main2.py, REMPLACEZ cette fonction
 
     def update_main_plot(self, y_test, y_pred):
         if y_test is None or y_pred is None:
@@ -2666,7 +2553,6 @@ class MainWindow(QMainWindow):
 
         fig = go.Figure()
         
-        # --- PARTIE 1 : AFFICHAGE DES DONNÉES VRP (CONTEXTE) ---
         if self.train_df_for_plot is not None:
             fig.add_trace(go.Scatter(x=self.train_df_for_plot['Date'], y=self.train_df_for_plot['VRP'], mode='markers', name='Données Entraînement', marker=dict(size=4, opacity=0.5)))
         if self.val_df_for_plot is not None:
@@ -2674,7 +2560,6 @@ class MainWindow(QMainWindow):
         if self.test_df_for_plot is not None:
             fig.add_trace(go.Scatter(x=self.test_df_for_plot['Date'], y=self.test_df_for_plot['VRP'], mode='markers', name='Données Test', marker=dict(size=4, opacity=0.6)))
 
-        # --- PARTIE 2 : GESTION DYNAMIQUE DES LABELS ET DES COULEURS ---
         y_pred_series = pd.Series(y_pred, index=y_test.index)
         
         color_map = {
@@ -2687,15 +2572,12 @@ class MainWindow(QMainWindow):
         color_index = 0
         for label in all_pred_labels:
             if label not in color_map:
-                # --- CORRECTION ICI : on passe la chaîne de couleur directement ---
                 color_map[label] = f'hsl({(color_index*70)%360}, 80%, 60%)'
                 color_index += 1
 
         all_labels_sorted = sorted(list(set(y_test.unique()) | set(all_pred_labels)))
         label_map_numeric = {label: i for i, label in enumerate(all_labels_sorted)}
         y_test_numeric = y_test.map(label_map_numeric)
-
-        # --- PARTIE 3 : TRAÇAGE DES ÉTATS ---
         fig.add_trace(go.Scatter(
             x=y_test.index, y=y_test_numeric, mode='markers', name='Vrai (État)', 
             marker=dict(symbol='circle-open', size=8, color='grey', line=dict(width=1)), yaxis="y2"
@@ -2711,7 +2593,6 @@ class MainWindow(QMainWindow):
                         marker=dict(symbol='x', size=8, color=color_map.get(label)), yaxis="y2"
                     ))
 
-        # --- PARTIE 4 : MISE EN FORME FINALE ---
         fig.update_layout(
             title="Prédictions vs Réalité sur les Ensembles de Données",
             xaxis_title="Date", yaxis_title="VRP [MW]",
@@ -2727,20 +2608,14 @@ class MainWindow(QMainWindow):
     def update_external_plot(self, df):
         ax = self.pred_results_canvas.axes
         ax.clear()
-
-        # 1. Tracer le signal VRP
         ax.plot(df['Date'], df['VRP'], '.-', color='gray', alpha=0.6, label='Données VRP')
         ax.set_ylabel("VRP [MW]", color='gray')
         ax.tick_params(axis='y', labelcolor='gray')
 
-        # 2. Créer un deuxième axe pour les prédictions
         ax2 = ax.twinx()
-        
-        # 3. Préparer les données pour le plot
         positive_class_map = {'High': 1, 'Pre-Event': 1}
         df['pred_numeric'] = df['Prediction'].map(positive_class_map).fillna(0)
         
-        # 4. Tracer les prédictions
         # Par défaut, on considère que toutes les prédictions sont des Faux Positifs (rouges)
         ax2.plot(df.loc[df['pred_numeric'] == 1, 'Date'], df.loc[df['pred_numeric'] == 1, 'pred_numeric'], 'x', color='red', markersize=8, label='Fausse Alerte (FP)')
         
@@ -2771,7 +2646,6 @@ class MainWindow(QMainWindow):
         self.pred_results_canvas.figure.tight_layout()
         self.pred_results_canvas.draw()
 
-    # Dans main2.py, REMPLACEZ cette fonction
 
     @pyqtSlot(object, object, object, list)
     def _display_shap_explanation(self, shap_values, base_value, instance_data, class_names):
@@ -2779,7 +2653,6 @@ class MainWindow(QMainWindow):
         Affiche le graphique SHAP (waterfall) en le recréant avec Plotly.
         """
         try:
-            # --- PARTIE 1 : Afficher les informations textuelles (inchangée) ---
             pred_proba = self.controller.current_explainer.model.predict_proba(instance_data.to_frame().T)[0]
             info_text = f"<b>Prédiction pour la date : {instance_data.name}</b><br>Probabilités prédites :<br>"
             for i, name in enumerate(class_names):
@@ -2883,14 +2756,6 @@ class MainWindow(QMainWindow):
         # S'assurer que la checkbox "Tout sélectionner" est décochée
         self.select_all_cb.setChecked(False)
 
-   
-
-    
-
-    
-
-    # Dans main2.py, REMPLACEZ cette fonction
-
     def _on_xai_tab_selected(self, index):
         """
         Met à jour l'onglet XAI lorsqu'il est sélectionné.
@@ -2902,16 +2767,13 @@ class MainWindow(QMainWindow):
 
         if self.controller.current_explainer:
             results = self.controller.last_training_results
-            
-            # --- CORRECTION DE LA SOURCE DES DONNÉES ---
-            # On utilise directement le X_test que l'explainer a en mémoire.
+
             # C'est la seule garantie d'être synchronisé.
             X_test_for_table = self.controller.current_explainer.X_test_for_shap
             
             # On récupère les vrais labels et les prédictions correspondantes
             y_test = results['plot_data']['y_test'].loc[X_test_for_table.index]
             y_pred = pd.Series(results['predictions'], index=results['plot_data']['y_test'].index).loc[X_test_for_table.index]
-            # --- FIN DE LA CORRECTION ---
 
             display_df = pd.DataFrame({
                 'Date': X_test_for_table.index,
@@ -2995,7 +2857,6 @@ class MainWindow(QMainWindow):
         selected_row_index = selected_items[0].row()
         self.controller.explain_prediction(selected_row_index)
 
-    # Dans main2.py, AJOUTEZ ces deux nouvelles méthodes à la classe MainWindow
 
     def _display_plotly_fig(self, canvas: QWebEngineView, fig: go.Figure):
         """
@@ -3053,4 +2914,5 @@ class MainWindow(QMainWindow):
 
 
     
+
 ## Nouveau fichier : launch_menu.py# --- START OF FILE launch_menu.py ---
