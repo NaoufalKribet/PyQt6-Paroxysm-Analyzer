@@ -1,5 +1,3 @@
-# --- START OF FILE launch_menu.py ---
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel
@@ -7,15 +5,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QFont
 
-# --- Import des fenêtres principales des deux modules ---
-# Module Volcanologie
 from main2 import MainWindow
 from app_controller import AppController
 
-# Module Sismique
 from seismic_main_window import SeismicMainWindow
 
-# La feuille de style est centralisée ici pour être importée par run_app.py
+
 DARK_STYLESHEET = """
     /* ================================
        PARAMÈTRES GLOBAUX
@@ -106,7 +101,6 @@ class LaunchMenu(QWidget):
     """
     def __init__(self):
         super().__init__()
-        # Garde une référence à la fenêtre ouverte pour éviter qu'elle ne soit détruite
         self.opened_window = None
         self.initUI()
 
@@ -119,59 +113,42 @@ class LaunchMenu(QWidget):
         main_layout.setContentsMargins(40, 30, 40, 40)
         main_layout.setSpacing(30)
 
-        # Label de titre
         title_label = QLabel("Choisissez Votre Domaine d'Analyse")
         font = QFont('Inter', 18, QFont.Weight.Bold)
         title_label.setFont(font)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Layout pour les boutons
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(30)
 
-        # Création des boutons avec icônes et texte
         self.volcano_button = QPushButton("🌋\nVolcanologie")
         self.seismic_button = QPushButton("📉\nSismique")
 
-        # Style des boutons
         button_font = QFont('Inter', 14)
         for button in [self.volcano_button, self.seismic_button]:
             button.setFont(button_font)
             button.setMinimumSize(QSize(220, 120))
             button.setStyleSheet("QPushButton { text-align: center; }")
 
-        # Ajout des boutons au layout dédié
         buttons_layout.addWidget(self.volcano_button)
         buttons_layout.addWidget(self.seismic_button)
 
-        # Assemblage du layout principal
         main_layout.addWidget(title_label)
         main_layout.addStretch()
         main_layout.addLayout(buttons_layout)
         main_layout.addStretch()
 
-        # Connexion des signaux des boutons à leurs fonctions
         self.volcano_button.clicked.connect(self.open_volcano_app)
         self.seismic_button.clicked.connect(self.open_seismic_app)
 
     def open_volcano_app(self):
-        """
-        Crée le contrôleur et la fenêtre principale pour l'analyse volcanique,
-        puis ferme le menu.
-        """
-        # Crée une instance fraîche du contrôleur pour ce module
         controller = AppController()
-        # Passe le contrôleur à la fenêtre principale
         self.opened_window = MainWindow(controller)
         self.opened_window.show()
-        self.close() # Ferme la fenêtre du menu
+        self.close() 
 
     def open_seismic_app(self):
-        """
-        Crée et affiche la fenêtre principale pour l'analyse sismique,
-        puis ferme le menu.
-        """
-        # La fenêtre sismique gère son propre contrôleur en interne
         self.opened_window = SeismicMainWindow()
         self.opened_window.show()
-        self.close() # Ferme la fenêtre du menu
+
+        self.close() 
