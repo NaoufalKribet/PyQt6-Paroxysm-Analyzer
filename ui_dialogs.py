@@ -1,5 +1,3 @@
-# ui_dialogs.py
-
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QProgressBar, QLabel,
@@ -12,19 +10,15 @@ class ProcessingDialog(QDialog):
     des opérations longues. Elle inclut une barre de progression, un message d'état,
     un journal détaillé et un bouton d'annulation.
     """
-    # Signal émis lorsque l'utilisateur clique sur le bouton "Annuler"
     cancelled = pyqtSignal()
 
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         
-        # --- Configuration de la fenêtre ---
         self.setWindowTitle(title)
         self.setMinimumSize(500, 300)
-        # Rend la fenêtre modale (bloque l'interaction avec la fenêtre parente)
         self.setModal(True) 
         
-        # --- Création des widgets ---
         self.status_label = QLabel("Initialisation...")
         self.status_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
 
@@ -39,7 +33,6 @@ class ProcessingDialog(QDialog):
 
         self.cancel_button = QPushButton("Annuler")
         
-        # --- Mise en page ---
         layout = QVBoxLayout(self)
         layout.addWidget(self.status_label)
         layout.addWidget(self.progress_bar)
@@ -50,7 +43,6 @@ class ProcessingDialog(QDialog):
         button_box.addButton(self.cancel_button, QDialogButtonBox.ButtonRole.RejectRole)
         layout.addWidget(button_box)
         
-        # --- Connexion des signaux ---
         self.cancel_button.clicked.connect(self._on_cancel)
 
     def _on_cancel(self):
@@ -60,7 +52,6 @@ class ProcessingDialog(QDialog):
         self.cancel_button.setText("Annulation en cours...")
         self.cancelled.emit()
 
-    # --- Slots publics pour mettre à jour l'UI depuis l'extérieur ---
 
     def update_progress(self, value: int, status_message: str):
         """Met à jour la barre de progression ET le message d'état."""
@@ -71,12 +62,10 @@ class ProcessingDialog(QDialog):
     def add_log_message(self, message: str):
         """Ajoute un message au journal détaillé."""
         self.log_area.append(message)
-        # Fait défiler automatiquement vers le bas
         self.log_area.verticalScrollBar().setValue(self.log_area.verticalScrollBar().maximum())
 
     def closeEvent(self, event):
         """Empêche la fermeture de la fenêtre avec la croix (seul Annuler fonctionne)."""
-        # On ignore l'événement pour empêcher la fermeture
         event.ignore()
 
     def task_finished(self):
@@ -84,14 +73,11 @@ class ProcessingDialog(QDialog):
         self.add_log_message("\n--- TÂCHE TERMINÉE AVEC SUCCÈS ---")
         self.progress_bar.setValue(100)
         self.status_label.setText("Terminé !")
-        # Remplace le bouton "Annuler" par "Fermer"
         self.cancel_button.setText("Fermer")
         self.cancel_button.setDisabled(False)
-        # Reconnecte le bouton pour fermer la fenêtre
         self.cancel_button.clicked.disconnect()
         self.cancel_button.clicked.connect(self.accept)
 
-# --- AJOUTEZ CETTE NOUVELLE CLASSE À LA FIN DU FICHIER ---
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel
 from PyQt6.QtGui import QMovie
 from PyQt6.QtCore import Qt
@@ -102,28 +88,24 @@ class ImageLoadingDialog(QDialog):
     """
     def __init__(self, image_path: str, parent=None):
         super().__init__(parent)
-        
-        # Configuration de la fenêtre pour un look épuré
+    
         self.setModal(True)
         self.setWindowTitle("Chargement en cours...")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # Widget principal pour afficher le GIF
         self.label = QLabel(self)
         self.movie = QMovie(image_path)
         
-        # S'assurer que le GIF est bien chargé
         if not self.movie.isValid():
             print(f"Erreur: Impossible de charger le GIF depuis {image_path}")
             self.label.setText("Chargement...")
         else:
             self.label.setMovie(self.movie)
-            # Redimensionner le dialogue à la taille du GIF
             self.setFixedSize(self.movie.frameRect().size())
             self.movie.start()
 
-        # Layout
         layout = QVBoxLayout()
         layout.addWidget(self.label)
+
         self.setLayout(layout)
