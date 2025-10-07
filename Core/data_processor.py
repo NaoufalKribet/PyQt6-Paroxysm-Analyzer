@@ -1,5 +1,3 @@
-# Core/data_processor.py (Version finale entièrement corrigée)
-
 import pandas as pd
 from typing import Optional, Dict, List
 import numpy as np 
@@ -13,8 +11,7 @@ def load_data(filepath: str) -> Optional[pd.DataFrame]:
     try:
         df = pd.read_excel(filepath)
         print(f"Fichier chargé : {filepath}. {len(df)} lignes initiales.")
-        
-        # --- ÉTAPE 1 : GESTION DES TIMESTAMPS EN DOUBLE (Inchangée) ---
+    
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'])
             if df.duplicated(subset=['Date']).any():
@@ -40,7 +37,6 @@ def load_data(filepath: str) -> Optional[pd.DataFrame]:
             else:
                  print("  - Aucune valeur manquante dans les colonnes critiques.")
 
-        # --- ÉTAPE 3 : NETTOYAGE ET VALIDATION DES ÉTIQUETTES (Inchangée) ---
         if 'Ramp' in df.columns:
             df['Ramp'] = df['Ramp'].astype(str).str.strip().str.title()
             print("\n--- Vérification des Étiquettes (Labels) après nettoyage ---")
@@ -48,7 +44,6 @@ def load_data(filepath: str) -> Optional[pd.DataFrame]:
             print("Distribution des étiquettes :\n", df['Ramp'].value_counts())
             print("----------------------------------------------------------")
         
-        # S'assurer de réinitialiser l'index après une possible suppression
         df.reset_index(drop=True, inplace=True)
         
         return df
@@ -72,12 +67,9 @@ def create_binary_target(df: pd.DataFrame,
     print(f"--- Création d'une cible binaire explicite ('Calm' vs '{positive_class_name}') ---")
     df_new = df.copy()
 
-    # Identifier les événements originaux ('High')
     is_event = (df_new[target_col].str.strip().str.title() == original_high_label)
-    
-    # Tout le reste est 'Calm' (écrase les 'Low', etc.)
+
     df_new[target_col] = 'Calm'
-    # Les événements deviennent la classe positive
     df_new.loc[is_event, target_col] = positive_class_name
     
     print("Nouvelle distribution binaire des étiquettes :")
@@ -101,7 +93,6 @@ def define_internal_event_cycle(df_block: pd.DataFrame,
     print(f"--- Définition du cycle d'événement (Logique Pré/Pendant/Post) ---")
     df = df_block.copy()
     
-    # Trouver les indices du premier et du dernier tag 'High' dans ce bloc
     high_indices = df.index[df[target_col].str.strip().str.title() == original_high_label]
     
     if high_indices.empty:
@@ -124,7 +115,6 @@ def define_internal_event_cycle(df_block: pd.DataFrame,
     
     df.loc[first_high_idx:last_high_idx, target_col] = 'High-Paroxysm'
 
-    # Ensuite, on redéfinit la première partie du bloc comme précurseur
     if pre_duration_in_high > 0:
         pre_event_end_idx = first_high_idx + pre_duration_in_high - 1
         df.loc[first_high_idx:pre_event_end_idx, target_col] = 'Pre-Event'
@@ -205,7 +195,6 @@ def split_dataframe_on_gaps(df: pd.DataFrame, max_gap_duration: pd.Timedelta) ->
         raise TypeError("La colonne 'Date' est nécessaire pour la détection des gaps.")
     
     df_copy['Date'] = pd.to_datetime(df_copy['Date'])
-    # On met la date en index pour les calculs, mais on la garde aussi en colonne.
     df_copy.set_index('Date', inplace=True, drop=False)
     df_copy.sort_index(inplace=True)
 
@@ -214,7 +203,6 @@ def split_dataframe_on_gaps(df: pd.DataFrame, max_gap_duration: pd.Timedelta) ->
     
     if len(split_points_indices) == 0:
         print("Aucun gap majeur détecté. Le DataFrame ne sera pas scindé.")
-        # CORRECTION : Retourne le df original (avec son DatetimeIndex) dans une liste.
         return [df_copy]
 
     print(f"Détection de {len(split_points_indices)} points de scission, créant {len(split_points_indices) + 1} segments.")
@@ -226,13 +214,11 @@ def split_dataframe_on_gaps(df: pd.DataFrame, max_gap_duration: pd.Timedelta) ->
     for split_pos in split_positions:
         segment = df_copy.iloc[last_split_pos:split_pos]
         if not segment.empty:
-            # CORRECTION : On ne réinitialise PAS l'index. On garde l'index temporel.
             segments.append(segment)
         last_split_pos = split_pos
 
     last_segment = df_copy.iloc[last_split_pos:]
     if not last_segment.empty:
-        # CORRECTION : On ne réinitialise PAS l'index ici non plus.
         segments.append(last_segment)
     
     print(f"DataFrame scindé en {len(segments)} segments non vides.")
@@ -260,4 +246,5 @@ def extract_activity_blocks(original_df: pd.DataFrame, detector_predictions: pd.
     
     active_df = df.reindex(active_dates).dropna(how='all')
     
+
     return active_df.reset_index()
