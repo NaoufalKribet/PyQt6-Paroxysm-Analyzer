@@ -1,0 +1,8 @@
+{
+  "version": "2.0",
+  "created": "2025-10-29T09:27:56.716416+00:00",
+  "compression_level": 6,
+  "auto_cleanup": true,
+  "max_models": 50,
+  "backup_enabled": true
+}
