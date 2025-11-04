@@ -8,8 +8,6 @@ from PyQt6.QtGui import QFont
 from main2 import MainWindow
 from app_controller import AppController
 
-#from seismic_main_window import SeismicMainWindow
-
 
 DARK_STYLESHEET = """
     /* ================================
