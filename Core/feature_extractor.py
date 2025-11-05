@@ -518,10 +518,6 @@ def _process_segments_parallel(segments: List[pd.DataFrame], config: Dict,
     return processed_segments
 
 
-# Dans Core/feature_extractor.py (remplacez la fonction existante par celle-ci)
-
-# Dans Core/feature_extractor.py, REMPLACEZ la fonction _process_single_segment existante par celle-ci
-
 def _process_single_segment(segment_df: pd.DataFrame, config: Dict,
                           feature_calc: FeatureCalculator,
                           expert_calc: ExpertFeaturesCalculator,
@@ -535,7 +531,6 @@ def _process_single_segment(segment_df: pd.DataFrame, config: Dict,
         print("    -> AVERTISSEMENT: Segment vide ou sans colonne 'VRP'. Ignoré.")
         return None
 
-    # On part d'une copie du segment pour conserver les colonnes pré-existantes.
     features_df = segment_df.copy()
     data_series = features_df['VRP']
     
@@ -543,7 +538,7 @@ def _process_single_segment(segment_df: pd.DataFrame, config: Dict,
 
     log_data_series = np.log1p(data_series.clip(lower=0))
     print("  -> Transformation logarithmique du signal VRP effectuée.")
-    # Boucle unique pour les calculs par fenêtre pour plus d'efficacité et de contrôle.
+
     for points in window_manager.windows_points:
         time_window_str = f"{points * 5}min"  # Assumant 5 minutes/point
 
