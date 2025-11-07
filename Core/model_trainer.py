@@ -108,7 +108,6 @@ class ModelConfig:
     nn_epochs: int = 200
     nn_batch_size: int = 64
     nn_learning_rate: float = 0.001
-    # --- FIN DE L'AJOUT ---
     
     def __post_init__(self):
         if self.weights is None: self.weights = ['uniform', 'distance']
