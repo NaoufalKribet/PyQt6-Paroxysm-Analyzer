@@ -1,47 +1,71 @@
+"""
+Data Processing Module for Seismic Event Analysis
+==================================================
+
+This module provides utilities for loading, cleaning, and preprocessing seismic data
+for volcanic activity detection and event cycle analysis.
+
+@author: KRIBET Naoufal
+@affiliation: 5th year Engineering Student, EOST (École et Observatoire des Sciences de la Terre)
+@date: 2025-11-12
+@version: 1.0
+"""
+
 import pandas as pd
 from typing import Optional, Dict, List
 import numpy as np 
 
 def load_data(filepath: str) -> Optional[pd.DataFrame]:
     """
-    Charge les données, gère les timestamps en double par agrégation, 
-    supprime les lignes avec des données critiques manquantes, et valide les étiquettes.
-    APPROCHE CONSERVATRICE SANS INTERPOLATION.
+    Loads seismic data from Excel file with conservative cleaning approach.
+    
+    This function handles duplicate timestamps through aggregation, removes rows
+    with missing critical data, and validates labels. No interpolation is performed
+    to maintain data integrity.
+    
+    @param filepath: Path to the Excel file containing seismic data
+    @return: Processed DataFrame or None if loading fails
+    @raises FileNotFoundError: If the specified file does not exist
+    @raises Exception: For any other unexpected errors during loading
     """
     try:
         df = pd.read_excel(filepath)
-        print(f"Fichier chargé : {filepath}. {len(df)} lignes initiales.")
+        print(f"File loaded: {filepath}. {len(df)} initial rows.")
     
+        # Handle Date column and duplicate timestamps
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'])
             if df.duplicated(subset=['Date']).any():
                 num_duplicates = df['Date'].duplicated().sum()
-                print(f"AVERTISSEMENT : {num_duplicates} timestamps en double détectés. Agrégation par moyenne...")
+                print(f"WARNING: {num_duplicates} duplicate timestamps detected. Aggregating by mean...")
                 df.sort_values('Date', inplace=True)
                 agg_rules = {col: 'mean' if pd.api.types.is_numeric_dtype(df[col]) else 'first' for col in df.columns if col != 'Date'}
                 df = df.groupby('Date').agg(agg_rules).reset_index()
-                print(f"  - Agrégation terminée. Le DataFrame contient maintenant {len(df)} lignes uniques.")
+                print(f"  - Aggregation completed. DataFrame now contains {len(df)} unique rows.")
 
+        # Clean missing values (NaN) by removal
         initial_rows = len(df)
         nan_counts = df.isna().sum()
         if nan_counts.sum() > 0:
-            print("\nNettoyage des valeurs manquantes (NaN) par suppression...")
-            print("NaN avant nettoyage :\n", nan_counts[nan_counts > 0])
+            print("\nCleaning missing values (NaN) by removal...")
+            print("NaN before cleaning:\n", nan_counts[nan_counts > 0])
             
+            # Drop rows with NaN in critical columns
             critical_cols = [col for col in ['VRP', 'Ramp'] if col in df.columns]
             df.dropna(subset=critical_cols, inplace=True)
             
             rows_dropped = initial_rows - len(df)
             if rows_dropped > 0:
-                print(f"  - {rows_dropped} lignes ont été supprimées car elles avaient des valeurs manquantes dans les colonnes critiques ('VRP', 'Ramp').")
+                print(f"  - {rows_dropped} rows were removed due to missing values in critical columns ('VRP', 'Ramp').")
             else:
-                 print("  - Aucune valeur manquante dans les colonnes critiques.")
+                 print("  - No missing values in critical columns.")
 
+        # Validate and normalize labels
         if 'Ramp' in df.columns:
             df['Ramp'] = df['Ramp'].astype(str).str.strip().str.title()
-            print("\n--- Vérification des Étiquettes (Labels) après nettoyage ---")
-            print("Étiquettes uniques :", df['Ramp'].unique().tolist())
-            print("Distribution des étiquettes :\n", df['Ramp'].value_counts())
+            print("\n--- Label Verification after cleaning ---")
+            print("Unique labels:", df['Ramp'].unique().tolist())
+            print("Label distribution:\n", df['Ramp'].value_counts())
             print("----------------------------------------------------------")
         
         df.reset_index(drop=True, inplace=True)
@@ -49,12 +73,12 @@ def load_data(filepath: str) -> Optional[pd.DataFrame]:
         return df
         
     except FileNotFoundError:
-        print(f"ERREUR : Le fichier n'a pas été trouvé à l'adresse : {filepath}")
+        print(f"ERROR: File not found at path: {filepath}")
         return None
         
     except Exception as e:
         import traceback
-        print(f"ERREUR : Une erreur inattendue est survenue lors du chargement. Trace : \n{traceback.format_exc()}")
+        print(f"ERROR: An unexpected error occurred during loading. Trace: \n{traceback.format_exc()}")
         return None
 
 def create_binary_target(df: pd.DataFrame, 
@@ -62,87 +86,136 @@ def create_binary_target(df: pd.DataFrame,
                          original_high_label: str = 'High',
                          target_col: str = 'Ramp') -> pd.DataFrame:
     """
-    Crée une cible binaire propre ('Calm' vs 'Actif') à partir des labels originaux.
+    Creates a clean binary target variable from original multi-class labels.
+    
+    Transforms the original labeling scheme into a binary classification problem
+    by mapping high activity events to the positive class and all other states
+    to the negative class ('Calm').
+    
+    @param df: Input DataFrame with original labels
+    @param positive_class_name: Name for the positive class (default: 'Actif')
+    @param original_high_label: Original label for high activity events (default: 'High')
+    @param target_col: Name of the target column (default: 'Ramp')
+    @return: DataFrame with binary target labels
+    
+    @author: KRIBET Naoufal
     """
-    print(f"--- Création d'une cible binaire explicite ('Calm' vs '{positive_class_name}') ---")
+    print(f"--- Creating explicit binary target ('Calm' vs '{positive_class_name}') ---")
     df_new = df.copy()
 
+    # Identify event rows
     is_event = (df_new[target_col].str.strip().str.title() == original_high_label)
 
+    # Set all to 'Calm' first, then override events
     df_new[target_col] = 'Calm'
     df_new.loc[is_event, target_col] = positive_class_name
     
-    print("Nouvelle distribution binaire des étiquettes :")
+    print("New binary label distribution:")
     print(df_new[target_col].value_counts())
     print("-------------------------------------------------------------")
     
     return df_new
+
 def define_internal_event_cycle(df_block: pd.DataFrame, 
                                 pre_event_ratio: float, 
                                 original_high_label: str = 'High',
                                 target_col: str = 'Ramp') -> pd.DataFrame:
     """
-    VERSION FINALE, DIRECTE ET ROBUSTE : Labellise les phases d'un bloc d'activité
-    en se basant sur la position relative par rapport aux étiquettes 'High' humaines.
+    Defines internal phases within volcanic activity blocks.
     
-    La logique est la suivante :
-    1. Tout ce qui précède le premier 'High' est 'Pre-Event'.
-    2. Le bloc 'High' est scindé en 'Pre-Event' et 'High-Paroxysm' via un ratio.
-    3. Tout ce qui suit le dernier 'High' est 'Post-Event'.
+    This function performs temporal phase labeling of seismic events based on
+    relative position with respect to human-labeled 'High' activity markers.
+    The methodology divides each activity block into three distinct phases:
+    
+    Phase Logic:
+    1. Pre-Event: All data points before the first 'High' marker
+    2. High-Paroxysm: The main event phase (subset of 'High' block)
+    3. Post-Event: All data points after the last 'High' marker
+    
+    The 'High' block itself is subdivided using pre_event_ratio to separate
+    the precursory phase from the paroxysmal phase.
+    
+    @param df_block: Block of activity data to be labeled
+    @param pre_event_ratio: Ratio of 'High' block to label as 'Pre-Event' phase (0.0 to 1.0)
+    @param original_high_label: Label marking high activity in original data (default: 'High')
+    @param target_col: Name of the target column to be modified (default: 'Ramp')
+    @return: DataFrame with phase labels (Pre-Event/High-Paroxysm/Post-Event)
+    
+    @author: KRIBET Naoufal
     """
-    print(f"--- Définition du cycle d'événement (Logique Pré/Pendant/Post) ---")
+    print(f"--- Defining event cycle (Pre/During/Post logic) ---")
     df = df_block.copy()
     
+    # Find all 'High' indices
     high_indices = df.index[df[target_col].str.strip().str.title() == original_high_label]
     
     if high_indices.empty:
-        print("  - AVERTISSEMENT: Aucun 'High' trouvé. Le bloc entier est labellisé 'Pre-Event'.")
+        print("  - WARNING: No 'High' found. Entire block labeled as 'Pre-Event'.")
         df[target_col] = 'Pre-Event'
         return df
 
     first_high_idx = high_indices.min()
     last_high_idx = high_indices.max()
     
-    print(f"  - Ancrage sur le bloc 'High' allant de l'index {first_high_idx} à {last_high_idx}.")
+    print(f"  - Anchoring on 'High' block from index {first_high_idx} to {last_high_idx}.")
 
-
+    # Label everything before first 'High' as 'Pre-Event'
     df.loc[:first_high_idx - 1, target_col] = 'Pre-Event'
 
+    # Label everything after last 'High' as 'Post-Event'
     df.loc[last_high_idx + 1:, target_col] = 'Post-Event'
 
+    # Split the 'High' block into 'Pre-Event' and 'High-Paroxysm'
     event_duration_points = last_high_idx - first_high_idx + 1
     pre_duration_in_high = int(event_duration_points * pre_event_ratio)
     
+    # Default to 'High-Paroxysm' for the entire 'High' block
     df.loc[first_high_idx:last_high_idx, target_col] = 'High-Paroxysm'
 
+    # Override the beginning portion to 'Pre-Event'
     if pre_duration_in_high > 0:
         pre_event_end_idx = first_high_idx + pre_duration_in_high - 1
         df.loc[first_high_idx:pre_event_end_idx, target_col] = 'Pre-Event'
 
-    print("\n  - Distribution finale des labels pour ce bloc :")
+    print("\n  - Final label distribution for this block:")
     print(df[target_col].value_counts())
     print("-------------------------------------------------------------")
     
     return df
+
 def balance_dataset(df: pd.DataFrame, params: Dict) -> Optional[pd.DataFrame]:
     """
-    Équilibre le jeu de données en se basant sur les événements "High" complets.
+    Balances dataset through event-based windowing strategy.
     
-    NOTE IMPORTANTE : Cette fonction est conçue pour l'ancienne définition de la cible
-    ('High'/'Low'). Elle n'est PAS compatible avec la nouvelle cible 'Pre-Event'/'Stable'.
+    This function creates a balanced dataset by extracting temporal windows around
+    complete "High" activity events. Each window includes context before and after
+    the event to provide the model with temporal evolution patterns.
+    
+    IMPORTANT NOTE: This function is designed for the legacy binary target definition
+    ('High'/'Low'). It is NOT compatible with the refined multi-phase target
+    ('Pre-Event'/'High-Paroxysm'/'Post-Event').
+    
+    @param df: Input DataFrame containing 'Ramp' column with event labels
+    @param params: Dictionary containing balancing parameters:
+                   - 'overrides': Dict mapping event indices to custom (start_offset, end_offset) tuples
+    @return: Balanced DataFrame or None if error occurs
+    @raises KeyError: If 'Ramp' column is not found
+    
     """
-    print("Début du processus d'équilibrage des données (méthode de fenêtrage d'événement)...")
+    print("Starting data balancing process (event windowing method)...")
     
     if 'Ramp' not in df.columns:
-        print("ERREUR: La colonne 'Ramp' est introuvable. Équilibrage annulé.")
+        print("ERROR: 'Ramp' column not found. Balancing canceled.")
         return None
 
+    # Identify 'High' events
     is_high = df['Ramp'] == "High"
 
     if not is_high.any():
-        print("AVERTISSEMENT: Aucune étiquette 'High' trouvée. L'équilibrage par fenêtrage est annulé.")
+        print("WARNING: No 'High' labels found. Windowing balance canceled.")
         return df
 
+    # Detect event start and end points
     is_start_of_event = (is_high & ~is_high.shift(1, fill_value=False))
     is_end_of_event = (is_high & ~is_high.shift(-1, fill_value=False))
 
@@ -150,11 +223,12 @@ def balance_dataset(df: pd.DataFrame, params: Dict) -> Optional[pd.DataFrame]:
     index_high_last = df.index[is_end_of_event].tolist()
     
     num_events = len(index_high_first)
-    print(f"Détection de {num_events} événements 'High' complets.")
+    print(f"Detected {num_events} complete 'High' events.")
 
     if num_events == 0:
         return df
 
+    # Create balanced segments around each event
     balanced_segments = []
     overrides = params.get('overrides', {})
 
@@ -163,6 +237,7 @@ def balance_dataset(df: pd.DataFrame, params: Dict) -> Optional[pd.DataFrame]:
         if j in overrides:
             start_offset, end_offset = overrides[j]
         else:
+            # Default: symmetric window before and after event
             size_event = last - first + 1
             size_af = size_event // 2
             size_bef = size_event - size_af
@@ -177,35 +252,50 @@ def balance_dataset(df: pd.DataFrame, params: Dict) -> Optional[pd.DataFrame]:
         return df
         
     balanced_df = pd.concat(balanced_segments, ignore_index=True)
-    print(f"Équilibrage par fenêtrage terminé. Le nouveau DataFrame contient {len(balanced_df)} lignes.")
+    print(f"Windowing balance completed. New DataFrame contains {len(balanced_df)} rows.")
     
     return balanced_df
 
 
 def split_dataframe_on_gaps(df: pd.DataFrame, max_gap_duration: pd.Timedelta) -> List[pd.DataFrame]:
     """
-    Scinde un DataFrame en une liste de segments basés sur les écarts de temps.
-    Cette version corrigée préserve l'index temporel original pour chaque segment.
+    Segments time-series data based on temporal discontinuities.
+    
+    This function identifies large gaps in the temporal sequence and splits the
+    DataFrame into continuous segments. This is crucial for volcanic monitoring
+    where data acquisition may be interrupted due to equipment maintenance,
+    transmission issues, or eruptive conditions.
+    
+    @param df: Input DataFrame with 'Date' column containing timestamps
+    @param max_gap_duration: Maximum acceptable gap duration before splitting (pd.Timedelta)
+    @return: List of DataFrame segments, each representing a continuous acquisition period
+    @raises TypeError: If 'Date' column is missing from input DataFrame
+    
+    @note: Original temporal index is preserved for each segment
     """
-    print(f"--- Recherche de gaps supérieurs à {max_gap_duration} pour la segmentation ---")
+    print(f"--- Searching for gaps larger than {max_gap_duration} for segmentation ---")
     
     df_copy = df.copy()
 
     if 'Date' not in df_copy.columns:
-        raise TypeError("La colonne 'Date' est nécessaire pour la détection des gaps.")
+        raise TypeError("'Date' column is required for gap detection.")
     
+    # Prepare temporal index
     df_copy['Date'] = pd.to_datetime(df_copy['Date'])
     df_copy.set_index('Date', inplace=True, drop=False)
     df_copy.sort_index(inplace=True)
 
+    # Calculate time differences between consecutive points
     time_diffs = df_copy.index.to_series().diff()
     split_points_indices = time_diffs[time_diffs > max_gap_duration].index
     
     if len(split_points_indices) == 0:
-        print("Aucun gap majeur détecté. Le DataFrame ne sera pas scindé.")
+        print("No major gaps detected. DataFrame will not be split.")
         return [df_copy]
 
-    print(f"Détection de {len(split_points_indices)} points de scission, créant {len(split_points_indices) + 1} segments.")
+    print(f"Detected {len(split_points_indices)} split points, creating {len(split_points_indices) + 1} segments.")
+    
+    # Create segments
     segments = []
     last_split_pos = 0
     
@@ -217,34 +307,41 @@ def split_dataframe_on_gaps(df: pd.DataFrame, max_gap_duration: pd.Timedelta) ->
             segments.append(segment)
         last_split_pos = split_pos
 
+    # Add final segment
     last_segment = df_copy.iloc[last_split_pos:]
     if not last_segment.empty:
         segments.append(last_segment)
     
-    print(f"DataFrame scindé en {len(segments)} segments non vides.")
+    print(f"DataFrame split into {len(segments)} non-empty segments.")
     return segments
 
 def extract_activity_blocks(original_df: pd.DataFrame, detector_predictions: pd.Series) -> pd.DataFrame:
     """
-    Filtre le DataFrame original pour ne conserver que les lignes
-    où le Détecteur a prédit un état "Actif".
-
-    Args:
-        original_df (pd.DataFrame): Le jeu de données complet avec la colonne 'Date'.
-        detector_predictions (pd.Series): La série des prédictions ('Calm'/'Actif')
-                                           avec un DatetimeIndex correspondant.
-
-    Returns:
-        pd.DataFrame: Un nouveau DataFrame contenant uniquement les données des blocs actifs.
+    Extracts activity blocks from complete dataset based on detector predictions.
+    
+    This function implements a two-stage detection framework where a binary detector
+    first identifies potential activity periods ('Actif'), and this function filters
+    the original dataset to retain only those periods for subsequent detailed analysis.
+    
+    @param original_df: Complete dataset with 'Date' column
+    @param detector_predictions: Series of binary predictions ('Calm'/'Actif') 
+                                 with DatetimeIndex matching original_df timestamps
+    @return: Filtered DataFrame containing only predicted active periods
+    @raises ValueError: If 'Date' column is missing from original_df
+    
+    @note: This is a key component of the hierarchical detection pipeline
+    @author: KRIBET Naoufal
     """
     if 'Date' not in original_df.columns:
-        raise ValueError("Le DataFrame original doit contenir la colonne 'Date'.")
+        raise ValueError("Original DataFrame must contain 'Date' column.")
     
+    # Set temporal index
     df = original_df.set_index('Date')
     
+    # Extract dates where detector predicted activity
     active_dates = detector_predictions[detector_predictions == 'Actif'].index
     
+    # Filter original data to active periods only
     active_df = df.reindex(active_dates).dropna(how='all')
     
-
     return active_df.reset_index()

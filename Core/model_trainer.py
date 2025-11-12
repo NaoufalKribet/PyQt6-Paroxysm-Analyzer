@@ -1,5 +1,3 @@
-# Core/model_trainer.py (Version Complète, Corrigée pour sample_weight)
-
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
@@ -14,7 +12,6 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 import time
 from sklearn.metrics import matthews_corrcoef 
-# Au début de Core/model_trainer.py
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Input
 from tensorflow.keras.callbacks import EarlyStopping
@@ -33,15 +30,11 @@ def _get_positive_class_f1_scorer(y_train: pd.Series):
     """
     labels_order = sorted(y_train.unique())
     
-    # Stratégie de détection de la classe positive
-    # Priorité 1 : La classe la plus critique est 'Pre-Event'
     if 'Pre-Event' in labels_order:
         positive_class_name = 'Pre-Event'
-    # Priorité 2 : Sinon, c'est la classe qui n'est pas 'Calm'
     else:
         positive_class_name = next((label for label in labels_order if label != 'Calm'), None)
 
-    # Si on a bien trouvé une classe positive à cibler
     if positive_class_name:
         try:
             positive_class_pos = labels_order.index(positive_class_name)
