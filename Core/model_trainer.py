@@ -50,9 +50,9 @@ Performance Considerations:
 - Early stopping mechanisms to prevent overfitting
 - Memory-efficient data handling with pandas DataFrames
 
-@author: Data Science Team
+@author: KRIBET Naoufal
 @version: 2.0.0
-@date: 2024
+@date: 2025-11-17
 """
 
 import pandas as pd
@@ -88,7 +88,7 @@ def _get_positive_class_f1_scorer(y_train: pd.Series):
     @param y_train: Training target labels used to identify unique classes
     @return: Custom sklearn scorer for positive class F1-score or 'f1_macro' as fallback
     @raises: None (falls back to f1_macro if errors occur)
-    @author: ML Pipeline Team
+    @author: KRIBET Naoufal
     """
     # Get sorted list of unique labels for consistent ordering
     labels_order = sorted(y_train.unique())
@@ -139,7 +139,7 @@ def _get_f1_macro_scorer():
     (high Precision for 'Actif', which implies high Recall for 'Calm').
 
     @return: Scorer name 'f1_macro' for scikit-learn
-    @author: ML Pipeline Team
+    @author: KRIBET Naoufal
     """
     logging.info("Optimization metric (scoring): Macro F1-Score (balanced).")
     
@@ -156,7 +156,7 @@ class ModelConfig:
     Centralizes all hyperparameters and training settings to ensure
     consistency across different model types and experiments.
     
-    @author: Configuration Management Team
+    @author: KRIBET Naoufal
     """
     # Data splitting ratios
     train_ratio: float = 0.7
@@ -199,7 +199,7 @@ class ModelTrainerError(Exception):
     Provides specific error handling for the training pipeline to distinguish
     training failures from other system errors.
     
-    @author: Error Handling Team
+    @author: KRIBET Naoufal
     """
     pass
 
@@ -213,7 +213,7 @@ def timing_context(operation_name: str):
     performance monitoring and optimization.
     
     @param operation_name: Name of the operation being timed
-    @author: Performance Team
+    @author: KRIBET Naoufal
     """
     start_time = time.time()
     try:
@@ -244,7 +244,7 @@ def train_and_evaluate_knn(X_train: pd.DataFrame, y_train: pd.Series,
     @param config: Model configuration object
     @return: Dictionary containing model, predictions, and evaluation metrics
     @raises ModelTrainerError: If no valid parameters are found
-    @author: KNN Team
+    @author: KRIBET Naoufal
     """
     # Step 1: Find optimal hyperparameters using validation set
     with timing_context("KNN hyperparameter search"):
@@ -279,7 +279,7 @@ def _find_best_knn_params(X_train: pd.DataFrame, y_train: pd.Series,
     @param config: Model configuration
     @return: Tuple of (best parameters dict, best F1 score)
     @raises ModelTrainerError: If no valid parameters found
-    @author: Hyperparameter Optimization Team
+    @author: KRIBET Naoufal
     """
     best_params = {}
     best_f1 = -1.0
@@ -340,7 +340,7 @@ def train_and_evaluate_rf(X_train: pd.DataFrame, y_train: pd.Series,
     @param config: Model configuration
     @param sample_weight: Optional sample weights for temporal weighting
     @return: Dictionary with model, predictions, and metrics
-    @author: Random Forest Team
+    @author:  KRIBET Naoufal
     """
     # Step 1: Hyperparameter optimization
     with timing_context("Random Forest hyperparameter search (Temporal)"):
@@ -381,7 +381,7 @@ def _find_best_rf_model(X_train: pd.DataFrame, y_train: pd.Series,
     @param sample_weight: Optional temporal weights
     @return: Tuple of (best model, best CV score)
     @raises ModelTrainerError: If search fails
-    @author: Hyperparameter Search Team
+    @author: KRIBET Naoufal 
     """
     logging.info("--- Launching RF search - Strategy: Early Warning ---")
 
@@ -488,7 +488,7 @@ def train_and_evaluate_lgbm(X_train: pd.DataFrame, y_train: pd.Series,
     @param sample_weight: Optional temporal weights
     @return: Dictionary with model, predictions, and metrics
     @raises ModelTrainerError: If training fails
-    @author: Gradient Boosting Team
+    @author: KRIBET Naoufal
     """
     logging.info("--- Launching LGBM training - Strategy: Aggressive Early Warning ---")
 
@@ -607,7 +607,7 @@ def _evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series,
     @param best_params: Best parameters used for training
     @return: Dictionary with predictions, probabilities, metrics, and analysis
     @raises ModelTrainerError: If evaluation fails
-    @author: Model Evaluation Team
+    @author: KRIBET Naoufal
     """
     try:
         # Capture prediction probabilities for each class
@@ -727,7 +727,7 @@ def train_and_evaluate_nn(X_train: pd.DataFrame, y_train: pd.Series,
     @param config: Model configuration
     @param sample_weight: Optional sample weights (unused in current implementation)
     @return: Dictionary with model, predictions, probabilities, and metrics
-    @author: Deep Learning Team
+    @author: KRIBET Naoufal
     """
     logging.info("--- Launching Neural Network training (Classifier) ---")
 
@@ -838,7 +838,7 @@ def create_sequences(data: pd.DataFrame, sequence_length: int, target_col: str =
     @param sequence_length: Number of past timesteps to use as input
     @param target_col: Name of the column to predict
     @return: Tuple of (X sequences, y targets, corresponding indices)
-    @author: Time Series Team
+    @author: KRIBET Naoufal
     """
     X, y, indices = [], [], []
     
@@ -864,7 +864,7 @@ def create_forecasting_model(sequence_length: int):
     
     @param sequence_length: Length of input sequences
     @return: Compiled Keras Sequential model
-    @author: LSTM Architecture Team
+    @author: KRIBET Naoufal
     """
     model = Sequential([
         Input(shape=(sequence_length, 1)),
@@ -890,7 +890,7 @@ def derive_state_from_forecast(y_true_vrp, y_pred_vrp, calm_threshold=300,
     @param paroxysm_threshold: Threshold for high activity
     @param growth_threshold: Relative growth rate for pre-event detection
     @return: Array of classification labels
-    @author: Domain Expert Team
+    @author: KRIBET Naoufal
     """
     labels = []
     
@@ -933,7 +933,7 @@ def train_and_evaluate_lstm_pinn(X_train: pd.DataFrame, y_train: pd.Series,
     @param config: Model configuration
     @param sample_weight: Optional sample weights (unused)
     @return: Dictionary with model, predictions, and metrics
-    @author: Physics-Informed ML Team
+    @author: KRIBET Naoufal
     """
     logging.info("--- Launching Physics-Informed LSTM (PINN) training ---")
 
