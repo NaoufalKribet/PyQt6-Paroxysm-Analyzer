@@ -16,7 +16,7 @@ versioning, and efficient retrieval are critical.
 
 @author: KRIBET Naoufal
 @affiliation: 5th year Engineering Student, EOST (École et Observatoire des Sciences de la Terre)
-@date: 2024
+@date: 2025-11-12
 @version: 2.0
 """
 

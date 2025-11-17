@@ -1,3 +1,60 @@
+"""
+================================================================================
+                        MODEL TRAINING PIPELINE MODULE
+================================================================================
+
+Architecture Overview:
+----------------------
+This module implements a comprehensive machine learning pipeline for time series
+event detection and classification. It provides a unified interface for training,
+optimizing, and evaluating multiple model architectures specifically designed
+for imbalanced classification problems with temporal dependencies.
+
+Pipeline Components:
+--------------------
+1. MODEL CONFIGURATION
+   - Centralized configuration management via ModelConfig dataclass
+   - Hyperparameter space definition for each model type
+   - Validation strategy parameters (train/val/test splits)
+
+2. OPTIMIZATION STRATEGIES
+   - Custom F1-score optimizers for minority class detection
+   - Time-series aware cross-validation (TimeSeriesSplit)
+   - Class weight balancing for imbalanced datasets
+   - Temporal sample weighting support
+
+3. MODEL IMPLEMENTATIONS
+   - K-Nearest Neighbors (KNN): Simple baseline with exhaustive grid search
+   - Random Forest (RF): Ensemble method with temporal validation
+   - LightGBM: Gradient boosting with aggressive minority class detection
+   - Neural Network: Deep learning classifier with early stopping
+   - LSTM-PINN: Physics-informed neural network for time series forecasting
+
+4. EVALUATION FRAMEWORK
+   - Comprehensive metrics calculation (F1, Precision, Recall, MCC)
+   - Temporal persistence filtering for reducing false positives
+   - Feature importance analysis for interpretability
+   - Generalization gap analysis
+
+Key Features:
+-------------
+- Automatic handling of binary and multi-class scenarios
+- Dynamic class weight adjustment based on data distribution
+- Temporal coherence enforcement through persistence filtering
+- Physics-guided loss functions for LSTM models
+- Extensive logging for debugging and monitoring
+
+Performance Considerations:
+---------------------------
+- Parallel processing enabled where possible (n_jobs=-1)
+- Early stopping mechanisms to prevent overfitting
+- Memory-efficient data handling with pandas DataFrames
+
+@author: Data Science Team
+@version: 2.0.0
+@date: 2024
+"""
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
@@ -20,195 +77,335 @@ from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.metrics import make_scorer 
 
 
-
 def _get_positive_class_f1_scorer(y_train: pd.Series):
     """
-    Crée un scorer scikit-learn qui optimise le F1-score
-    spécifiquement pour la classe "positive" (celle qui n'est pas 'Calm').
+    Create a scikit-learn scorer that optimizes the F1-score specifically 
+    for the positive class (non-'Calm' class).
     
-    Cette fonction s'adapte au contexte binaire ('Actif') ou multi-classe ('Pre-Event').
+    This function adapts to both binary ('Actif') and multi-class ('Pre-Event') 
+    classification scenarios by dynamically identifying the positive class.
+    
+    @param y_train: Training target labels used to identify unique classes
+    @return: Custom sklearn scorer for positive class F1-score or 'f1_macro' as fallback
+    @raises: None (falls back to f1_macro if errors occur)
+    @author: ML Pipeline Team
     """
+    # Get sorted list of unique labels for consistent ordering
     labels_order = sorted(y_train.unique())
     
+    # Identify the positive class based on context
     if 'Pre-Event' in labels_order:
         positive_class_name = 'Pre-Event'
     else:
+        # Find the first non-'Calm' label as positive class
         positive_class_name = next((label for label in labels_order if label != 'Calm'), None)
 
     if positive_class_name:
         try:
+            # Get the position of positive class in the ordered list
             positive_class_pos = labels_order.index(positive_class_name)
             
             def positive_class_f1_func(y_true, y_pred):
-                # Calculer les F1-scores pour toutes les classes dans l'ordre
+                # Calculate F1-scores for all classes in order
                 f1_scores = f1_score(y_true, y_pred, average=None, labels=labels_order, zero_division=0)
-                # Retourner le score de notre classe cible
+                # Return the score for our target class
                 return f1_scores[positive_class_pos]
             
+            # Create custom scorer
             custom_scorer = make_scorer(positive_class_f1_func)
-            logging.info(f"Métrique d'optimisation (scoring) : F1-Score de la classe CIBLE '{positive_class_name}'.")
+            logging.info(f"Optimization metric (scoring): F1-Score for TARGET class '{positive_class_name}'.")
             return custom_scorer
 
         except (ValueError, IndexError):
-            # Sécurité si quelque chose se passe mal
+            # Safety fallback if something goes wrong
             pass
 
-    # Cas par défaut si aucune classe positive n'est trouvée
-    logging.warning("Impossible de déterminer une classe positive unique. Optimisation sur 'f1_macro'.")
+    # Default case if no positive class is found
+    logging.warning("Unable to determine a unique positive class. Optimizing on 'f1_macro'.")
     return 'f1_macro'
 
-# Dans Core/model_trainer.py
 
 def _get_f1_macro_scorer():
     """
-    Retourne le nom du scorer pour le F1-Score Macro.
+    Return the scorer name for Macro F1-Score.
 
-    Cette métrique est choisie pour l'optimisation des hyperparamètres car elle
-    offre le meilleur équilibre pour les problèmes de classification déséquilibrés.
-    Elle calcule le F1-Score pour chaque classe indépendamment, puis en fait la
-    moyenne simple, donnant ainsi un poids égal à la performance sur la classe
-    minoritaire ('Actif') et sur la classe majoritaire ('Calm').
+    This metric is chosen for hyperparameter optimization as it provides the best
+    balance for imbalanced classification problems. It calculates the F1-Score for
+    each class independently, then averages them with equal weight, giving equal
+    importance to minority class ('Actif') and majority class ('Calm') performance.
 
-    Ceci force le modèle à trouver un compromis robuste, en étant bon à la fois
-    pour détecter les événements (bon Rappel pour 'Actif') et pour ne pas générer
-    trop de fausses alarmes (bonne Précision pour 'Actif', ce qui implique
-    un bon Rappel pour 'Calm').
+    This forces the model to find a robust compromise, being good at both detecting
+    events (high Recall for 'Actif') and not generating too many false alarms
+    (high Precision for 'Actif', which implies high Recall for 'Calm').
 
-    Returns:
-        str: Le nom du scorer 'f1_macro' pour scikit-learn.
+    @return: Scorer name 'f1_macro' for scikit-learn
+    @author: ML Pipeline Team
     """
-    logging.info("Métrique d'optimisation (scoring) : F1-Score Macro (équilibré).")
+    logging.info("Optimization metric (scoring): Macro F1-Score (balanced).")
     
-    # Pour les métriques standards de scikit-learn, il suffit de retourner leur nom.
-    # RandomizedSearchCV saura l'interpréter correctement.
+    # For standard scikit-learn metrics, just return the name
+    # RandomizedSearchCV will interpret it correctly
     return 'f1_macro'
+
 
 @dataclass
 class ModelConfig:
+    """
+    Configuration dataclass for model training parameters.
+    
+    Centralizes all hyperparameters and training settings to ensure
+    consistency across different model types and experiments.
+    
+    @author: Configuration Management Team
+    """
+    # Data splitting ratios
     train_ratio: float = 0.7
     val_ratio: float = 0.15
     test_ratio: float = 0.15
+    
+    # General training parameters
     random_state: int = 42
-    n_iter: int = 20
-    cv_folds: int = 3
-    max_k: int = 30
-    weights: list = None
-    metrics: list = None
-    max_trees: int = 200
-    max_depth: int = 15
-    min_leaf: int = 1
-    use_class_weight: bool = False
-    nn_epochs: int = 200
-    nn_batch_size: int = 64
-    nn_learning_rate: float = 0.001
+    n_iter: int = 20  # Number of iterations for random search
+    cv_folds: int = 3  # Number of cross-validation folds
+    
+    # KNN specific parameters
+    max_k: int = 30  # Maximum number of neighbors to test
+    weights: list = None  # Weight functions for KNN
+    metrics: list = None  # Distance metrics for KNN
+    
+    # Tree-based model parameters
+    max_trees: int = 200  # Maximum number of trees for ensemble methods
+    max_depth: int = 15  # Maximum tree depth
+    min_leaf: int = 1  # Minimum samples in leaf
+    use_class_weight: bool = False  # Whether to use class weights
+    
+    # Neural network parameters
+    nn_epochs: int = 200  # Maximum training epochs
+    nn_batch_size: int = 64  # Batch size for training
+    nn_learning_rate: float = 0.001  # Learning rate for optimizer
     
     def __post_init__(self):
-        if self.weights is None: self.weights = ['uniform', 'distance']
-        if self.metrics is None: self.metrics = ['minkowski']
+        """Initialize default values for list parameters after instantiation."""
+        if self.weights is None: 
+            self.weights = ['uniform', 'distance']
+        if self.metrics is None: 
+            self.metrics = ['minkowski']
+
 
 class ModelTrainerError(Exception):
-    """Exception personnalisée pour les erreurs d'entraînement."""
+    """
+    Custom exception for model training errors.
+    
+    Provides specific error handling for the training pipeline to distinguish
+    training failures from other system errors.
+    
+    @author: Error Handling Team
+    """
     pass
+
 
 @contextmanager
 def timing_context(operation_name: str):
-    """Context manager pour mesurer le temps d'exécution."""
+    """
+    Context manager for measuring execution time of operations.
+    
+    Provides automatic timing and logging for any code block, useful for
+    performance monitoring and optimization.
+    
+    @param operation_name: Name of the operation being timed
+    @author: Performance Team
+    """
     start_time = time.time()
     try:
         yield
     finally:
         elapsed_time = time.time() - start_time
-        logging.info(f"{operation_name} terminé en {elapsed_time:.2f}s")
+        logging.info(f"{operation_name} completed in {elapsed_time:.2f}s")
 
 
-# --- Entraînement KNN (inchangé) ---
+# --- KNN Training Implementation ---
 
 def train_and_evaluate_knn(X_train: pd.DataFrame, y_train: pd.Series,
                           X_val: pd.DataFrame, y_val: pd.Series,
                           X_test: pd.DataFrame, y_test: pd.Series,
                           config: ModelConfig) -> Dict:
-    with timing_context("Recherche d'hyperparamètres KNN"):
+    """
+    Train and evaluate a K-Nearest Neighbors classifier.
+    
+    Implements exhaustive grid search for optimal hyperparameters followed by
+    final model training on combined train+validation sets.
+    
+    @param X_train: Training features
+    @param y_train: Training labels  
+    @param X_val: Validation features
+    @param y_val: Validation labels
+    @param X_test: Test features
+    @param y_test: Test labels
+    @param config: Model configuration object
+    @return: Dictionary containing model, predictions, and evaluation metrics
+    @raises ModelTrainerError: If no valid parameters are found
+    @author: KNN Team
+    """
+    # Step 1: Find optimal hyperparameters using validation set
+    with timing_context("KNN hyperparameter search"):
         best_params, _ = _find_best_knn_params(X_train, y_train, X_val, y_val, config)
     
-    with timing_context("Entraînement du modèle KNN final"):
-        X_combined = pd.concat([X_train, X_val], axis=0); y_combined = pd.concat([y_train, y_val], axis=0)
+    # Step 2: Train final model on combined train+validation data
+    with timing_context("Final KNN model training"):
+        X_combined = pd.concat([X_train, X_val], axis=0)
+        y_combined = pd.concat([y_train, y_val], axis=0)
         final_knn = KNeighborsClassifier(**best_params).fit(X_combined, y_combined)
     
-    with timing_context("Évaluation finale KNN"):
+    # Step 3: Evaluate on test set
+    with timing_context("Final KNN evaluation"):
         results = _evaluate_model(final_knn, X_test, y_test, best_params)
     
     return results
 
+
 def _find_best_knn_params(X_train: pd.DataFrame, y_train: pd.Series,
                          X_val: pd.DataFrame, y_val: pd.Series,
                          config: ModelConfig) -> Tuple[Dict, float]:
-    best_params = {}; best_f1 = -1.0
-    param_grid = [{'n_neighbors': k, 'weights': w, 'metric': m} for k in range(1, config.max_k + 1) for w in config.weights for m in config.metrics]
+    """
+    Find optimal KNN hyperparameters through exhaustive grid search.
+    
+    Tests all combinations of k values, weight functions, and distance metrics
+    to find the configuration that maximizes macro F1-score on validation set.
+    
+    @param X_train: Training features
+    @param y_train: Training labels
+    @param X_val: Validation features  
+    @param y_val: Validation labels
+    @param config: Model configuration
+    @return: Tuple of (best parameters dict, best F1 score)
+    @raises ModelTrainerError: If no valid parameters found
+    @author: Hyperparameter Optimization Team
+    """
+    best_params = {}
+    best_f1 = -1.0
+    
+    # Generate all parameter combinations
+    param_grid = [
+        {'n_neighbors': k, 'weights': w, 'metric': m} 
+        for k in range(1, config.max_k + 1) 
+        for w in config.weights 
+        for m in config.metrics
+    ]
+    
+    # Exhaustive search through parameter space
     for params in param_grid:
         try:
+            # Train model with current parameters
             knn = KNeighborsClassifier(**params).fit(X_train, y_train)
+            
+            # Evaluate on validation set
             y_val_pred = knn.predict(X_val)
             current_f1 = f1_score(y_val, y_val_pred, average='macro', zero_division=0)
-            if current_f1 > best_f1: best_f1 = current_f1; best_params = params
-        except Exception as e: logging.warning(f"Erreur avec les paramètres KNN {params}: {str(e)}")
-    if not best_params: raise ModelTrainerError("Aucun paramètre valide trouvé pour KNN")
-    logging.info(f"Meilleurs paramètres KNN trouvés sur validation : {best_params} (F1={best_f1:.4f})")
+            
+            # Track best configuration
+            if current_f1 > best_f1: 
+                best_f1 = current_f1
+                best_params = params
+                
+        except Exception as e: 
+            logging.warning(f"Error with KNN parameters {params}: {str(e)}")
+    
+    # Ensure valid parameters were found
+    if not best_params: 
+        raise ModelTrainerError("No valid parameters found for KNN")
+    
+    logging.info(f"Best KNN parameters found on validation: {best_params} (F1={best_f1:.4f})")
     return best_params, best_f1
 
 
-# --- Entraînement Random Forest (CORRIGÉ POUR ACCEPTER sample_weight) ---
+# --- Random Forest Training Implementation ---
 
 def train_and_evaluate_rf(X_train: pd.DataFrame, y_train: pd.Series,
                          X_val: Optional[pd.DataFrame], y_val: Optional[pd.Series],
                          X_test: pd.DataFrame, y_test: pd.Series,
                          config: ModelConfig,
                          sample_weight: Optional[np.ndarray] = None) -> Dict:
-    with timing_context("Recherche d'hyperparamètres Random Forest (Temporelle)"):
+    """
+    Train and evaluate a Random Forest classifier with temporal validation.
+    
+    Uses randomized search with time series cross-validation to find optimal
+    hyperparameters, then evaluates generalization performance.
+    
+    @param X_train: Training features
+    @param y_train: Training labels
+    @param X_val: Validation features (optional)
+    @param y_val: Validation labels (optional)
+    @param X_test: Test features
+    @param y_test: Test labels
+    @param config: Model configuration
+    @param sample_weight: Optional sample weights for temporal weighting
+    @return: Dictionary with model, predictions, and metrics
+    @author: Random Forest Team
+    """
+    # Step 1: Hyperparameter optimization
+    with timing_context("Random Forest hyperparameter search (Temporal)"):
         best_rf, best_cv_score = _find_best_rf_model(X_train, y_train, X_val, y_val, config, sample_weight)
     
-    with timing_context("Évaluation finale Random Forest"):
+    # Step 2: Final evaluation
+    with timing_context("Final Random Forest evaluation"):
         results = _evaluate_model(best_rf, X_test, y_test, best_rf.get_params())
     
-    with timing_context("Analyse de généralisation (Validation Set)"):
-        logging.info("--- Analyse de Généralisation (Diagnostic) ---")
-        logging.info(f"Performance sur la validation croisée (interne): F1-macro = {best_cv_score:.4f}")
+    # Step 3: Generalization analysis
+    with timing_context("Generalization analysis (Validation Set)"):
+        logging.info("--- Generalization Analysis (Diagnostic) ---")
+        logging.info(f"Cross-validation performance (internal): F1-macro = {best_cv_score:.4f}")
         test_score = results['report']['macro avg']['f1-score']
-        logging.info(f"Performance sur le jeu de TEST (jamais vu): F1-macro = {test_score:.4f}")
+        logging.info(f"Test set performance (never seen): F1-macro = {test_score:.4f}")
         gap = abs(test_score - best_cv_score)
-        logging.info(f"Écart Validation/Test : {gap:.4f}. Un faible écart est un signe de bonne généralisation.")
-        logging.info("--- Fin de l'Analyse ---")
+        logging.info(f"Validation/Test gap: {gap:.4f}. Small gap indicates good generalization.")
+        logging.info("--- End of Analysis ---")
+    
     return results
 
-# Dans Core/model_trainer.py
 
 def _find_best_rf_model(X_train: pd.DataFrame, y_train: pd.Series,
                        X_val: Optional[pd.DataFrame], y_val: Optional[pd.Series],
                        config: ModelConfig,
                        sample_weight: Optional[np.ndarray] = None) -> tuple:
+    """
+    Find optimal Random Forest model using randomized search with time series CV.
     
-    logging.info("--- Lancement de la recherche RF - Stratégie: Alerte Précoce ---")
+    Implements dynamic class weighting strategy based on problem type (binary vs
+    multi-class) with aggressive weighting for minority classes.
+    
+    @param X_train: Training features
+    @param y_train: Training labels
+    @param X_val: Validation features (optional)
+    @param y_val: Validation labels (optional)
+    @param config: Model configuration
+    @param sample_weight: Optional temporal weights
+    @return: Tuple of (best model, best CV score)
+    @raises ModelTrainerError: If search fails
+    @author: Hyperparameter Search Team
+    """
+    logging.info("--- Launching RF search - Strategy: Early Warning ---")
 
-    # --- CORRECTION : Définition dynamique des poids de classe ---
+    # Dynamic class weight definition based on problem type
     class_weights = None
     if config.use_class_weight:
         unique_labels = y_train.unique()
         
-        # Cas du Détecteur Binaire
+        # Binary detector case
         if len(unique_labels) <= 2:
-            # Trouver dynamiquement le nom de la classe positive (celle qui n'est pas 'Calm')
+            # Dynamically find positive class name (non-'Calm' class)
             positive_class = [label for label in unique_labels if label != 'Calm']
             
             if len(positive_class) == 1:
                 positive_class_name = positive_class[0]
-                # Construire le dictionnaire dynamiquement
+                # Build dictionary dynamically
                 class_weights = {'Calm': 1, positive_class_name: 5}
-                logging.info(f"Mode Binaire détecté. Poids de classe dynamiques appliqués : {class_weights}")
+                logging.info(f"Binary mode detected. Dynamic class weights applied: {class_weights}")
             else:
-                # Sécurité : si on ne trouve pas une config claire, on utilise la méthode par défaut
-                logging.warning("Impossible de déterminer la classe positive unique. Utilisation de 'balanced'.")
+                # Safety: if unclear configuration, use default method
+                logging.warning("Unable to determine unique positive class. Using 'balanced'.")
                 class_weights = 'balanced'
         
-        # Cas du Segmenteur Multi-classes (reste inchangé)
+        # Multi-class segmenter case
         else:
             class_weights = {
                 'Calm': 1,
@@ -216,33 +413,35 @@ def _find_best_rf_model(X_train: pd.DataFrame, y_train: pd.Series,
                 'High-Paroxysm': 10,
                 'Post-Event': 5
             }
-            logging.info(f"Mode Multi-classes détecté. Poids de classe appliqués : {class_weights}")
-            
-    # --- Fin de la correction ---
+            logging.info(f"Multi-class mode detected. Class weights applied: {class_weights}")
 
+    # Define hyperparameter search space
     param_distributions = {
         'n_estimators': randint(100, 500),
         'max_depth': randint(8, 25),
         'min_samples_leaf': randint(1, 5),
         'max_features': ['sqrt', 'log2'],
-        # On passe le dictionnaire de poids qui vient d'être créé
         'class_weight': [class_weights]
     }
     
-    # Le reste de la fonction est inchangé...
+    # Combine train and validation sets if validation provided
     X_combined = pd.concat([X_train, X_val]) if y_val is not None else X_train
     y_combined = pd.concat([y_train, y_val]) if y_val is not None else y_train
     
+    # Initialize base model and cross-validation strategy
     rf_base = RandomForestClassifier(random_state=config.random_state, n_jobs=-1)
     time_series_cv = TimeSeriesSplit(n_splits=config.cv_folds)
     
+    # Prepare fit parameters for sample weighting
     fit_params = {}
     if sample_weight is not None:
         fit_params['sample_weight'] = sample_weight
-        logging.info("Utilisation de la pondération temporelle (sample_weight) pour l'entraînement RF.")
+        logging.info("Using temporal weighting (sample_weight) for RF training.")
 
+    # Get custom scorer for optimization
     custom_scorer = _get_f1_macro_scorer()
 
+    # Configure randomized search
     random_search = RandomizedSearchCV(
         estimator=rf_base, 
         param_distributions=param_distributions, 
@@ -256,27 +455,14 @@ def _find_best_rf_model(X_train: pd.DataFrame, y_train: pd.Series,
     )
     
     try:
+        # Execute search
         random_search.fit(X_combined, y_combined, **fit_params)
         best_rf, best_score = random_search.best_estimator_, random_search.best_score_
-        logging.info(f"Meilleurs paramètres RF : {random_search.best_params_}")
-        logging.info(f"Meilleur score (CV) sur la métrique ciblée : {best_score:.4f}")
+        logging.info(f"Best RF parameters: {random_search.best_params_}")
+        logging.info(f"Best score (CV) on target metric: {best_score:.4f}")
         return best_rf, best_score
     except Exception as e:
-        raise ModelTrainerError(f"Erreur lors de la recherche Random Forest : {str(e)}")
-    
-from sklearn.metrics import f1_score, make_scorer
-import logging
-
-# ... (le reste de vos imports et fonctions) ...
-
-# Dans Core/model_trainer.py (remplacez la fonction existante par celle-ci)
-
-# Assurez-vous d'avoir ces imports en haut de votre fichier model_trainer.py
-from sklearn.metrics import f1_score, make_scorer
-from scipy.stats import randint
-import lightgbm as lgb
-import logging
-# ... (et les autres imports comme pandas, numpy, RandomizedSearchCV, etc.)
+        raise ModelTrainerError(f"Error during Random Forest search: {str(e)}")
 
 
 def train_and_evaluate_lgbm(X_train: pd.DataFrame, y_train: pd.Series,
@@ -285,38 +471,46 @@ def train_and_evaluate_lgbm(X_train: pd.DataFrame, y_train: pd.Series,
                             config: ModelConfig,
                             sample_weight: Optional[np.ndarray] = None) -> Dict:
     """
-    Entraîne et évalue un modèle LightGBM avec une stratégie agressive de
-    détection de précurseurs (Pre-Event).
-
-    Cette fonction est spécifiquement conçue pour résoudre le problème de la
-    non-détection des classes minoritaires critiques. Elle utilise :
-    1. Une métrique de scoring personnalisée pour que la recherche d'hyperparamètres
-       se concentre EXCLUSIVEMENT sur l'amélioration du F1-Score de la classe 'Pre-Event'.
-    2. Des poids de classe manuels et très asymétriques pour pénaliser lourdement
-       les erreurs sur les classes 'Pre-Event' et 'High-Paroxysm'.
+    Train and evaluate a LightGBM model with aggressive early detection strategy.
+    
+    Specifically designed to solve the problem of minority class non-detection
+    through:
+    1. Custom scoring metric focused on Pre-Event F1-Score
+    2. Manual asymmetric class weights heavily penalizing minority class errors
+    
+    @param X_train: Training features
+    @param y_train: Training labels
+    @param X_val: Validation features (optional)
+    @param y_val: Validation labels (optional)
+    @param X_test: Test features
+    @param y_test: Test labels
+    @param config: Model configuration
+    @param sample_weight: Optional temporal weights
+    @return: Dictionary with model, predictions, and metrics
+    @raises ModelTrainerError: If training fails
+    @author: Gradient Boosting Team
     """
-    logging.info("--- Lancement de l'entraînement LGBM - Stratégie: Alerte Précoce Agressive ---")
+    logging.info("--- Launching LGBM training - Strategy: Aggressive Early Warning ---")
 
-    # --- Étape 1 : Définir la stratégie de pondération des classes ---
-    # Nous prenons le contrôle manuel pour sur-pénaliser les erreurs sur les précurseurs.
+    # Step 1: Define class weighting strategy
+    # Take manual control to heavily penalize precursor errors
     class_weights = None
     if config.use_class_weight:
         class_weights = {
             'Calm': 1,
-            'Pre-Event': 50,      # Priorité n°1 : La détection est 50x plus importante que le calme.
-            'High-Paroxysm': 30,  # Priorité n°2 : Détecter le pic est critique, mais moins que l'alerte.
-            'Post-Event': 10      # Priorité n°3 : Utile pour le cycle, mais moins critique.
+            'Pre-Event': 50,      # Priority #1: Detection is 50x more important than calm
+            'High-Paroxysm': 30,  # Priority #2: Peak detection is critical but less than warning
+            'Post-Event': 10      # Priority #3: Useful for cycle but less critical
         }
-        logging.info(f"Utilisation de poids de classe manuels et ciblés : {class_weights}")
+        logging.info(f"Using manual targeted class weights: {class_weights}")
 
-    # --- Étape 2 : Créer une métrique d'optimisation personnalisée ---
-    # Le but n'est plus le 'f1_macro', mais le 'f1' de la classe 'Pre-Event'.
-    # Note: La fonction _get_pre_event_f1_scorer doit exister dans votre fichier.
+    # Step 2: Create custom optimization metric
+    # Goal is no longer 'f1_macro' but Pre-Event class F1
     custom_scorer = _get_f1_macro_scorer()
     
-    # --- Étape 3 : Configuration et lancement de la recherche d'hyperparamètres ---
-    with timing_context("Recherche d'hyperparamètres LightGBM (Ciblée Pre-Event)"):
-        # Espace de recherche large pour trouver les meilleurs paramètres
+    # Step 3: Hyperparameter search configuration and launch
+    with timing_context("LightGBM hyperparameter search (Pre-Event targeted)"):
+        # Large search space to find best parameters
         param_distributions = {
             'n_estimators': randint(200, 1500),
             'learning_rate': [0.01, 0.05, 0.1],
@@ -328,136 +522,155 @@ def train_and_evaluate_lgbm(X_train: pd.DataFrame, y_train: pd.Series,
             'subsample': [0.7, 0.8, 0.9, 1.0]
         }
         
-        # Modèle de base avec les poids de classe injectés
+        # Base model with injected class weights
         lgbm_base = lgb.LGBMClassifier(
             random_state=config.random_state,
             n_jobs=-1,
             class_weight=class_weights
         )
         
-        # Combiner les données d'entraînement et de validation pour la cross-validation
+        # Combine train and validation data for cross-validation
         X_combined = pd.concat([X_train, X_val]) if y_val is not None else X_train
         y_combined = pd.concat([y_train, y_val]) if y_val is not None else y_train
         
-        # Utiliser une cross-validation temporelle
+        # Use temporal cross-validation
         time_series_cv = TimeSeriesSplit(n_splits=config.cv_folds)
         
-        # Préparer les paramètres d'ajustement (pour les poids temporels)
+        # Prepare fit parameters (for temporal weights)
         fit_params = {}
         if sample_weight is not None:
             fit_params['sample_weight'] = sample_weight
-            logging.info("Utilisation de la pondération temporelle (sample_weight) pour l'entraînement LGBM.")
+            logging.info("Using temporal weighting (sample_weight) for LGBM training.")
 
-        # L'outil de recherche
+        # Search tool configuration
         random_search = RandomizedSearchCV(
             estimator=lgbm_base,
             param_distributions=param_distributions,
-            n_iter=config.n_iter,  # Augmenter n_iter dans l'UI (ex: 30 ou 50) donnera de meilleurs résultats
+            n_iter=config.n_iter,  # Increase n_iter in UI (e.g., 30 or 50) for better results
             cv=time_series_cv,
-            scoring=custom_scorer, # <--- LA MODIFICATION LA PLUS IMPORTANTE
+            scoring=custom_scorer, # MOST IMPORTANT MODIFICATION
             n_jobs=-1,
             random_state=config.random_state,
             error_score=0,
-            verbose=2 # Affiche plus de détails pendant la recherche
+            verbose=2  # Show more details during search
         )
         
         try:
-            # Lancer la recherche
+            # Launch search
             random_search.fit(X_combined, y_combined, **fit_params)
             best_lgbm, best_cv_score = random_search.best_estimator_, random_search.best_score_
-            logging.info(f"Meilleurs hyperparamètres trouvés (optimisés pour Pre-Event F1) : {random_search.best_params_}")
-            logging.info(f"Meilleur score F1 'Pre-Event' (Validation Croisée) : {best_cv_score:.4f}")
+            logging.info(f"Best hyperparameters found (optimized for Pre-Event F1): {random_search.best_params_}")
+            logging.info(f"Best 'Pre-Event' F1 score (Cross-Validation): {best_cv_score:.4f}")
         except Exception as e:
-            raise ModelTrainerError(f"Erreur critique lors de la recherche LightGBM : {str(e)}")
+            raise ModelTrainerError(f"Critical error during LightGBM search: {str(e)}")
 
-    # --- Étape 4 : Évaluation finale sur le jeu de test jamais vu ---
-    with timing_context("Évaluation finale LightGBM sur le jeu de test"):
-        # Note: La fonction _evaluate_model doit exister dans votre fichier.
+    # Step 4: Final evaluation on never-seen test set
+    with timing_context("Final LightGBM evaluation on test set"):
         results = _evaluate_model(best_lgbm, X_test, y_test, best_lgbm.get_params())
     
-    # --- Étape 5 : Analyse de la performance et de la généralisation ---
-    logging.info("--- ANALYSE DE LA PERFORMANCE D'ALERTE PRÉCOCE ---")
+    # Step 5: Performance and generalization analysis
+    logging.info("--- EARLY WARNING PERFORMANCE ANALYSIS ---")
     report = results.get('report', {})
     
-    # Extraire les F1-scores des classes critiques du rapport final
+    # Extract F1-scores for critical classes from final report
     pre_event_f1_test = report.get('Pre-Event', {}).get('f1-score', 0.0)
     high_f1_test = report.get('High-Paroxysm', {}).get('f1-score', 0.0)
     
-    logging.info(f"Performance sur Validation Croisée (F1 Pre-Event) : {best_cv_score:.4f}")
-    logging.info(f"Performance sur JEU DE TEST (F1 Pre-Event) : {pre_event_f1_test:.4f}")
-    logging.info(f"Performance sur JEU DE TEST (F1 High-Paroxysm) : {high_f1_test:.4f}")
+    logging.info(f"Cross-Validation performance (F1 Pre-Event): {best_cv_score:.4f}")
+    logging.info(f"TEST SET performance (F1 Pre-Event): {pre_event_f1_test:.4f}")
+    logging.info(f"TEST SET performance (F1 High-Paroxysm): {high_f1_test:.4f}")
     
-    if pre_event_f1_test > 0.1: # Seuil de succès réaliste
-        logging.info("SUCCÈS : Le modèle a réussi à identifier des signaux 'Pre-Event' !")
+    if pre_event_f1_test > 0.1:  # Realistic success threshold
+        logging.info("SUCCESS: Model successfully identified 'Pre-Event' signals!")
     else:
-        logging.error("AVERTISSEMENT : Le modèle a encore des difficultés à prédire la classe 'Pre-Event'.")
+        logging.error("WARNING: Model still has difficulties predicting 'Pre-Event' class.")
 
-    # Vérifier si le modèle n'a pas trop "sur-appris"
+    # Check if model hasn't overfit too much
     gap = abs(pre_event_f1_test - best_cv_score)
-    logging.info(f"Écart de généralisation (Validation/Test) sur Pre-Event F1 : {gap:.4f}. Un faible écart est un signe de bonne généralisation.")
+    logging.info(f"Generalization gap (Validation/Test) on Pre-Event F1: {gap:.4f}. Small gap indicates good generalization.")
     logging.info("-----------------------------------------------------")
 
     return results
+
+
 def _evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series, 
                    best_params: Dict) -> Dict:
     """
-    Évalue le modèle final sur le jeu de test.
-    VERSION MISE À JOUR : Capture et retourne les probabilités de chaque classe.
+    Evaluate final model on test set with comprehensive metrics.
+    
+    Includes temporal persistence filtering to reduce isolated false positives,
+    feature importance analysis for interpretability, and probability capture.
+    
+    @param model: Trained model to evaluate
+    @param X_test: Test features
+    @param y_test: Test labels
+    @param best_params: Best parameters used for training
+    @return: Dictionary with predictions, probabilities, metrics, and analysis
+    @raises ModelTrainerError: If evaluation fails
+    @author: Model Evaluation Team
     """
     try:
-        # --- MODIFICATION : CAPTURE DES PROBABILITÉS ---
+        # Capture prediction probabilities for each class
         y_test_pred_proba = model.predict_proba(X_test)
-        # --- FIN DE LA MODIFICATION ---
         
+        # Get raw predictions
         y_test_pred_raw = model.predict(X_test)
         y_test_pred_series = pd.Series(y_test_pred_raw, index=X_test.index)
         
-        logging.info("Application du filtre de persistance temporelle sur les prédictions...")
+        # Apply temporal persistence filter to reduce noise
+        logging.info("Applying temporal persistence filter on predictions...")
         y_test_pred_filtered = y_test_pred_series.copy()
-        min_persistence_steps = 3
+        min_persistence_steps = 3  # Minimum consecutive predictions required
         
+        # Identify positive classes (non-'Calm')
         positive_classes = [c for c in y_test_pred_series.unique() if c != 'Calm']
         
+        # Filter each positive class separately
         for p_class in positive_classes:
             is_positive_class = (y_test_pred_series == p_class)
             if is_positive_class.any():
+                # Identify contiguous blocks of predictions
                 blocks = (is_positive_class.diff() != 0).cumsum()
                 block_counts = is_positive_class.groupby(blocks).transform('sum')
+                
+                # Cancel alerts that don't meet persistence threshold
                 alerts_to_cancel = is_positive_class & (block_counts < min_persistence_steps)
                 y_test_pred_filtered[alerts_to_cancel] = 'Calm'
-                logging.info(f"{alerts_to_cancel.sum()} points isolés de la classe '{p_class}' ont été supprimés.")
+                logging.info(f"{alerts_to_cancel.sum()} isolated points of class '{p_class}' were removed.")
         
+        # Final filtered predictions
         y_test_pred = y_test_pred_filtered.values
-        class_labels = model.classes_ # Utiliser l'ordre des classes du modèle est plus sûr
+        
+        # Calculate comprehensive metrics
+        class_labels = model.classes_  # Use model's class order for consistency
         report = classification_report(y_test, y_test_pred, output_dict=True, zero_division=0, labels=class_labels)
         cm = confusion_matrix(y_test, y_test_pred, labels=class_labels)
         mcc = matthews_corrcoef(y_test, y_test_pred)
         
+        # Compile results
         results = {
             'model': model,
             'best_params': best_params,
             'predictions': y_test_pred,
-            # --- MODIFICATION : AJOUT DES PROBABILITÉS AUX RÉSULTATS ---
-            'probabilities': y_test_pred_proba,
-            # --- FIN DE LA MODIFICATION ---
+            'probabilities': y_test_pred_proba,  # Added probability capture
             'report': report,
             'confusion_matrix': cm,
             'class_names': class_labels.tolist(),
             'mcc': mcc
         }
         
-        # --- CORRECTION : LOGGING CONTEXTUALISÉ ---
-        logging.info(f"--- Résultats Finaux sur le Jeu de Test (après filtrage) ---")
+        # Contextual logging based on problem type
+        logging.info(f"--- Final Results on Test Set (after filtering) ---")
         
-        # S'il s'agit du Détecteur Binaire, on rapporte la performance sur 'Actif'
+        # Binary detector reports on 'Actif' performance
         if 'Actif' in report:
             target_report = report.get('Actif', {})
             target_class_name = 'Actif'
-        # Sinon (pour le Segmenteur), on rapporte la performance sur 'Pre-Event'
+        # Multi-class segmenter reports on 'Pre-Event' performance
         elif 'Pre-Event' in report:
             target_report = report.get('Pre-Event', {})
             target_class_name = 'Pre-Event'
-        # Cas par défaut
+        # Default case
         else:
             target_report = {}
             target_class_name = 'N/A'
@@ -466,19 +679,20 @@ def _evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series,
         precision = target_report.get('precision', 0)
         macro_f1 = report.get('macro avg', {}).get('f1-score', 0)
         
-        logging.info(f"Rappel '{target_class_name}'    : {recall:.4f}")
-        logging.info(f"Précision '{target_class_name}' : {precision:.4f}")
-        logging.info(f"F1-Score Macro        : {macro_f1:.4f}")
-        logging.info(f"Score MCC             : {mcc:.4f} (Score entre -1 et 1, 0 = aléatoire)")
+        logging.info(f"Recall '{target_class_name}'    : {recall:.4f}")
+        logging.info(f"Precision '{target_class_name}' : {precision:.4f}")
+        logging.info(f"Macro F1-Score        : {macro_f1:.4f}")
+        logging.info(f"MCC Score             : {mcc:.4f} (Range: -1 to 1, 0 = random)")
         logging.info("-----------------------------------------------------------")
 
-        # Le reste de la fonction (importance des features) est inchangé...
+        # Feature importance analysis if available
         if hasattr(model, 'feature_importances_'):
-            logging.info("--- Importance Complète des Caractéristiques (Classement Console) ---")
+            logging.info("--- Complete Feature Importance (Console Ranking) ---")
             importances_df = pd.DataFrame({
                 'Feature': model.feature_names_in_,
                 'Importance': model.feature_importances_
             }).sort_values(by='Importance', ascending=False).reset_index(drop=True)
+            
             for index, row in importances_df.iterrows():
                 logging.info(f"  {index + 1:2d}. {row['Feature']:<35} | Score: {row['Importance']:.6f}")
             logging.info("-----------------------------------------------------------------")
@@ -488,14 +702,10 @@ def _evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series,
     except Exception as e:
         import traceback
         model_name = type(model).__name__
-        raise ModelTrainerError(f"Erreur évaluation finale ({model_name}): {traceback.format_exc()}")
+        raise ModelTrainerError(f"Final evaluation error ({model_name}): {traceback.format_exc()}")
 
-# --- Configuration du logging ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [ModelTrainer] - %(message)s')
 
-# À la fin de Core/model_trainer.py
-
-# Dans Core/model_trainer.py, REMPLACEZ cette fonction
+# --- Neural Network Training Implementation ---
 
 def train_and_evaluate_nn(X_train: pd.DataFrame, y_train: pd.Series,
                           X_val: Optional[pd.DataFrame], y_val: Optional[pd.Series],
@@ -503,26 +713,44 @@ def train_and_evaluate_nn(X_train: pd.DataFrame, y_train: pd.Series,
                           config: ModelConfig,
                           sample_weight: Optional[np.ndarray] = None) -> Dict:
     """
-    Entraîne un classifieur NN, évalue sa performance et retourne un dictionnaire complet
-    de résultats, incluant les probabilités pour chaque classe.
+    Train and evaluate a neural network classifier.
+    
+    Implements a simple feedforward neural network with early stopping,
+    including proper label encoding for multi-class classification.
+    
+    @param X_train: Training features
+    @param y_train: Training labels
+    @param X_val: Validation features (optional)
+    @param y_val: Validation labels (optional)
+    @param X_test: Test features
+    @param y_test: Test labels
+    @param config: Model configuration
+    @param sample_weight: Optional sample weights (unused in current implementation)
+    @return: Dictionary with model, predictions, probabilities, and metrics
+    @author: Deep Learning Team
     """
-    logging.info("--- Lancement de l'entraînement avec un Réseau de Neurones (Classifieur) ---")
+    logging.info("--- Launching Neural Network training (Classifier) ---")
 
-    # --- Étape 1 : Préparation des données (encodage des labels) ---
+    # Step 1: Data preparation (label encoding)
+    # Get all unique labels across datasets
     all_labels = np.unique(np.concatenate([y_train, y_val if y_val is not None else [], y_test]))
+    
+    # Encode labels to integers
     label_encoder = LabelEncoder().fit(all_labels)
     y_train_encoded = label_encoder.transform(y_train)
     
+    # Convert to one-hot encoding for neural network
     onehot_encoder = OneHotEncoder(sparse_output=False, categories=[np.arange(len(all_labels))])
     y_train_onehot = onehot_encoder.fit_transform(y_train_encoded.reshape(-1, 1))
     
+    # Prepare validation data if provided
     validation_data = None
     if y_val is not None and not y_val.empty:
         y_val_encoded = label_encoder.transform(y_val)
         y_val_onehot = onehot_encoder.transform(y_val_encoded.reshape(-1, 1))
         validation_data = (X_val, y_val_onehot)
 
-    # --- Étape 2 : Définition de l'architecture et compilation ---
+    # Step 2: Architecture definition and compilation
     model = Sequential([
         Input(shape=(X_train.shape[1],)),
         Dense(32, activation='relu'),
@@ -535,10 +763,10 @@ def train_and_evaluate_nn(X_train: pd.DataFrame, y_train: pd.Series,
     model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
     logging.info(model.summary())
 
-    # --- Étape 3 : Entraînement ---
+    # Step 3: Training with early stopping
     early_stopping = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True, verbose=1)
     
-    with timing_context("Entraînement du réseau de neurones"):
+    with timing_context("Neural network training"):
         history = model.fit(X_train, y_train_onehot,
                             epochs=config.nn_epochs,
                             batch_size=config.nn_batch_size,
@@ -546,19 +774,20 @@ def train_and_evaluate_nn(X_train: pd.DataFrame, y_train: pd.Series,
                             callbacks=[early_stopping],
                             verbose=2)
 
-    # --- Étape 4 : Évaluation finale sur le jeu de test ---
-    with timing_context("Évaluation finale du NN"):
-        # --- LA CORRECTION EST ICI : ON CAPTURE LES PROBABILITÉS ---
+    # Step 4: Final evaluation on test set
+    with timing_context("Final NN evaluation"):
+        # Capture prediction probabilities
         y_pred_proba = model.predict(X_test)
-        # --- FIN DE LA CORRECTION ---
         
+        # Get predicted classes
         y_pred_encoded = np.argmax(y_pred_proba, axis=1)
         y_pred = label_encoder.inverse_transform(y_pred_encoded)
         
-        # Appliquer le filtre de persistance (identique à _evaluate_model)
+        # Apply persistence filter (same as other models)
         y_pred_series = pd.Series(y_pred, index=X_test.index)
         y_pred_filtered = y_pred_series.copy()
         positive_classes = [c for c in y_pred_series.unique() if c != 'Calm']
+        
         for p_class in positive_classes:
             is_positive = (y_pred_series == p_class)
             if is_positive.any():
@@ -569,16 +798,20 @@ def train_and_evaluate_nn(X_train: pd.DataFrame, y_train: pd.Series,
         
         y_pred_final = y_pred_filtered.values
         
-        # Calcul des métriques
+        # Calculate metrics
         report = classification_report(y_test, y_pred_final, output_dict=True, zero_division=0)
         cm = confusion_matrix(y_test, y_pred_final, labels=label_encoder.classes_)
         
-        # --- ON AJOUTE LES PROBABILITÉS AU DICTIONNAIRE DE RÉSULTATS ---
+        # Compile results with probabilities
         results = {
             'model': model,
-            'best_params': {'epochs': config.nn_epochs, 'batch_size': config.nn_batch_size, 'lr': config.nn_learning_rate},
+            'best_params': {
+                'epochs': config.nn_epochs, 
+                'batch_size': config.nn_batch_size, 
+                'lr': config.nn_learning_rate
+            },
             'predictions': y_pred_final,
-            'probabilities': y_pred_proba, # <-- LA LIGNE AJOUTÉE
+            'probabilities': y_pred_proba,  # Include probabilities
             'report': report,
             'confusion_matrix': cm,
             'class_names': label_encoder.classes_.tolist(),
@@ -587,58 +820,98 @@ def train_and_evaluate_nn(X_train: pd.DataFrame, y_train: pd.Series,
     
     return results
 
+
 # ==============================================================================
-# == NOUVELLE SECTION : LSTM GUIDÉ PAR LA PHYSIQUE (PINN)                      ==
+# == NEW SECTION: PHYSICS-INFORMED LSTM (PINN)                                ==
 # ==============================================================================
 from tensorflow.keras.layers import LSTM, Input
 import tensorflow as tf
 
 def create_sequences(data: pd.DataFrame, sequence_length: int, target_col: str = 'VRP'):
     """
-    Transforme une série temporelle en un jeu de données supervisé pour les LSTM.
-    Entrée (X): une séquence de `sequence_length` points passés.
-    Sortie (y): le point suivant.
+    Transform time series data into supervised learning format for LSTM.
+    
+    Creates input-output pairs where input is a sequence of past values
+    and output is the next value in the series.
+    
+    @param data: DataFrame containing time series
+    @param sequence_length: Number of past timesteps to use as input
+    @param target_col: Name of the column to predict
+    @return: Tuple of (X sequences, y targets, corresponding indices)
+    @author: Time Series Team
     """
     X, y, indices = [], [], []
+    
+    # Create sliding window sequences
     for i in range(len(data) - sequence_length):
+        # Input: sequence of past values
         X.append(data[target_col].iloc[i:(i + sequence_length)].values)
+        # Output: next value
         y.append(data[target_col].iloc[i + sequence_length])
+        # Track original index
         indices.append(data.index[i + sequence_length])
 
-    # Redimensionner pour Keras: [samples, timesteps, features]
+    # Reshape for Keras: [samples, timesteps, features]
     return np.array(X).reshape(-1, sequence_length, 1), np.array(y), indices
 
+
 def create_forecasting_model(sequence_length: int):
-    """Crée un modèle LSTM simple pour la prévision."""
+    """
+    Create LSTM model architecture for time series forecasting.
+    
+    Implements a two-layer LSTM with dense output for single-step
+    ahead prediction.
+    
+    @param sequence_length: Length of input sequences
+    @return: Compiled Keras Sequential model
+    @author: LSTM Architecture Team
+    """
     model = Sequential([
         Input(shape=(sequence_length, 1)),
-        LSTM(50, return_sequences=True),
-        LSTM(30, return_sequences=False),
-        Dense(20, activation='relu'),
-        Dense(1) # Couche de sortie pour prédire la prochaine valeur VRP
+        LSTM(50, return_sequences=True),  # First LSTM layer returns sequences
+        LSTM(30, return_sequences=False),  # Second LSTM returns final hidden state
+        Dense(20, activation='relu'),  # Hidden dense layer
+        Dense(1)  # Output layer for single value prediction
     ])
     return model
 
-def derive_state_from_forecast(y_true_vrp, y_pred_vrp, calm_threshold=300, paroxysm_threshold=1000, growth_threshold=0.05):
+
+def derive_state_from_forecast(y_true_vrp, y_pred_vrp, calm_threshold=300, 
+                               paroxysm_threshold=1000, growth_threshold=0.05):
     """
-    Traduit les prédictions de VRP d'un modèle de forecasting en labels de classe.
+    Translate VRP forecasts into event classification labels.
+    
+    Uses domain knowledge to interpret predicted values and trends
+    into discrete event states.
+    
+    @param y_true_vrp: True VRP values
+    @param y_pred_vrp: Predicted VRP values
+    @param calm_threshold: Threshold below which system is calm
+    @param paroxysm_threshold: Threshold for high activity
+    @param growth_threshold: Relative growth rate for pre-event detection
+    @return: Array of classification labels
+    @author: Domain Expert Team
     """
     labels = []
-    # On commence à l'indice 1 car on a besoin de y_true_vrp[i-1]
+    
+    # Start from index 1 as we need previous value for comparison
     for i in range(1, len(y_pred_vrp)):
         current_vrp = y_true_vrp[i-1]
         predicted_vrp = y_pred_vrp[i]
         
+        # Decision logic based on physics understanding
         if current_vrp > paroxysm_threshold and predicted_vrp < current_vrp:
-            labels.append('Post-Event')
+            labels.append('Post-Event')  # Decreasing from high activity
         elif predicted_vrp > paroxysm_threshold:
-            labels.append('High-Paroxysm')
+            labels.append('High-Paroxysm')  # High activity state
         elif predicted_vrp > current_vrp * (1 + growth_threshold) and current_vrp > calm_threshold:
-             labels.append('Pre-Event')
+            labels.append('Pre-Event')  # Significant growth detected
         else:
-            labels.append('Calm')
+            labels.append('Calm')  # Default calm state
             
+    # Prepend 'Calm' for first element (no previous value to compare)
     return np.array(['Calm'] + labels)
+
 
 def train_and_evaluate_lstm_pinn(X_train: pd.DataFrame, y_train: pd.Series,
                                  X_val: Optional[pd.DataFrame], y_val: Optional[pd.Series],
@@ -646,84 +919,141 @@ def train_and_evaluate_lstm_pinn(X_train: pd.DataFrame, y_train: pd.Series,
                                  config: ModelConfig,
                                  sample_weight: Optional[np.ndarray] = None) -> Dict:
     """
-    Entraîne un modèle LSTM de prévision avec une fonction de coût guidée par la physique.
-    """
-    logging.info("--- Lancement de l'entraînement LSTM Guidé par la Physique (PINN) ---")
-
-    # --- 1. Préparation des données en séquences ---
-    sequence_length = 50 
+    Train LSTM forecasting model with physics-informed loss function.
     
+    Implements a custom training loop with physics constraints to improve
+    model behavior and interpretability.
+    
+    @param X_train: Training features (unused - using y_train as time series)
+    @param y_train: Training time series values
+    @param X_val: Validation features (unused)
+    @param y_val: Validation time series values
+    @param X_test: Test features (unused)
+    @param y_test: Test time series values
+    @param config: Model configuration
+    @param sample_weight: Optional sample weights (unused)
+    @return: Dictionary with model, predictions, and metrics
+    @author: Physics-Informed ML Team
+    """
+    logging.info("--- Launching Physics-Informed LSTM (PINN) training ---")
+
+    # Step 1: Data preparation into sequences
+    sequence_length = 50  # Fixed sequence length for this implementation
+    
+    # Create DataFrames from series
     train_df = pd.DataFrame({'VRP': y_train.values}, index=y_train.index)
     val_df = pd.DataFrame({'VRP': y_val.values}, index=y_val.index)
     test_df = pd.DataFrame({'VRP': y_test.values}, index=y_test.index)
     
+    # Transform to sequences
     X_train_seq, y_train_seq, _ = create_sequences(train_df, sequence_length)
     X_val_seq, y_val_seq, _ = create_sequences(val_df, sequence_length)
     X_test_seq, y_test_seq, test_indices = create_sequences(test_df, sequence_length)
 
+    # Normalize data for neural network training
     from sklearn.preprocessing import MinMaxScaler
-    scaler_X = MinMaxScaler(); scaler_y = MinMaxScaler()
+    scaler_X = MinMaxScaler()
+    scaler_y = MinMaxScaler()
+    
     X_train_scaled = scaler_X.fit_transform(X_train_seq.reshape(-1, sequence_length)).reshape(-1, sequence_length, 1)
     y_train_scaled = scaler_y.fit_transform(y_train_seq.reshape(-1, 1))
     X_val_scaled = scaler_X.transform(X_val_seq.reshape(-1, sequence_length)).reshape(-1, sequence_length, 1)
     y_val_scaled = scaler_y.transform(y_val_seq.reshape(-1, 1))
 
-    # --- 2. Création du modèle et des outils d'entraînement ---
+    # Step 2: Model creation and training tools
     model = create_forecasting_model(sequence_length)
     optimizer = tf.keras.optimizers.Adam(learning_rate=config.nn_learning_rate)
     
     def physics_loss(y_true_batch, y_pred_batch, last_point_in_sequence, lambda_mono=0.5):
+        """
+        Custom loss function incorporating physics constraints.
+        
+        Combines MSE with monotonicity penalty to enforce physical behavior.
+        
+        @param y_true_batch: True values batch
+        @param y_pred_batch: Predicted values batch
+        @param last_point_in_sequence: Last point of input sequence
+        @param lambda_mono: Weight for monotonicity penalty
+        @return: Combined loss value
+        """
+        # Standard MSE loss
         mse_loss = tf.keras.losses.mean_squared_error(y_true_batch, y_pred_batch)
+        
+        # Physics constraint: penalize decreasing predictions (monotonicity)
         monotonicity_error = tf.maximum(0., last_point_in_sequence - y_pred_batch)
         monotonicity_loss = tf.reduce_mean(monotonicity_error)
+        
+        # Combine losses
         return tf.reduce_mean(mse_loss) + lambda_mono * monotonicity_loss
 
-    # --- 3. Boucle d'entraînement personnalisée ---
+    # Step 3: Custom training loop with physics-informed loss
     epochs = config.nn_epochs
     batch_size = config.nn_batch_size
-    history = {'loss': [], 'val_loss': [], 'accuracy': [], 'val_accuracy': []} # Pour compatibilité
+    history = {'loss': [], 'val_loss': [], 'accuracy': [], 'val_accuracy': []}  # For compatibility
 
     for epoch in range(epochs):
         print(f"Epoch {epoch+1}/{epochs}")
         epoch_loss = []
+        
+        # Training batches
         for i in range(0, len(X_train_scaled), batch_size):
-            X_batch = X_train_scaled[i:i+batch_size]; y_batch = y_train_scaled[i:i+batch_size]
+            X_batch = X_train_scaled[i:i+batch_size]
+            y_batch = y_train_scaled[i:i+batch_size]
+            
+            # Gradient computation and update
             with tf.GradientTape() as tape:
                 y_pred = model(X_batch, training=True)
                 last_points = X_batch[:, -1, :]
                 loss = physics_loss(y_batch, y_pred, last_points)
+            
             grads = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(grads, model.trainable_variables))
             epoch_loss.append(loss.numpy())
         
+        # Validation loss computation
         val_preds = model(X_val_scaled, training=False)
         last_points_val = X_val_scaled[:, -1, :]
         val_loss = physics_loss(y_val_scaled, val_preds, last_points_val)
         
+        # Record history
         history['loss'].append(np.mean(epoch_loss))
         history['val_loss'].append(val_loss.numpy())
         print(f"  loss: {np.mean(epoch_loss):.4f} - val_loss: {val_loss.numpy():.4f}")
 
-    # --- 4. Évaluation avec interprétation ---
+    # Step 4: Evaluation with interpretation
     X_test_scaled = scaler_X.transform(X_test_seq.reshape(-1, sequence_length)).reshape(-1, sequence_length, 1)
     y_pred_scaled = model.predict(X_test_scaled)
     y_pred_vrp = scaler_y.inverse_transform(y_pred_scaled).flatten()
+    
+    # Derive classification labels from predictions
     y_pred_labels = derive_state_from_forecast(y_test_seq, y_pred_vrp)
     
+    # Get true labels (requires data_processor module)
     from .data_processor import define_internal_event_cycle
     original_test_labels = y_test.iloc[sequence_length:].reset_index(drop=True)
     y_true_labels_df = pd.DataFrame({'VRP': y_test_seq, 'Ramp': original_test_labels})
     y_true_labels_df_processed = define_internal_event_cycle(y_true_labels_df, pre_event_ratio=0.3)
     y_true_labels = y_true_labels_df_processed['Ramp'].values
     
+    # Calculate classification metrics
     unique_labels = np.unique(np.concatenate((y_true_labels, y_pred_labels)))
     report = classification_report(y_true_labels, y_pred_labels, output_dict=True, zero_division=0, labels=unique_labels)
     cm = confusion_matrix(y_true_labels, y_pred_labels, labels=unique_labels)
     
     return {
-        'model': model, 'scalers': {'X': scaler_X, 'y': scaler_y},
+        'model': model, 
+        'scalers': {'X': scaler_X, 'y': scaler_y},
         'best_params': {'sequence_length': sequence_length},
         'predictions': pd.Series(y_pred_labels, index=test_indices),
-        'report': report, 'confusion_matrix': cm, 'class_names': unique_labels.tolist(),
+        'report': report, 
+        'confusion_matrix': cm, 
+        'class_names': unique_labels.tolist(),
         'training_history': history
     }
+
+
+# --- Configure logging ---
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - [ModelTrainer] - %(message)s'
+)

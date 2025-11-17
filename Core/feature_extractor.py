@@ -1,4 +1,24 @@
-# Core/feature_extractor_optimized.py - Version avec cohérence des types
+"""
+Feature Extraction Module for Volcanic Activity Analysis
+=========================================================
+
+This module provides optimized functions to extract a comprehensive set of
+features from time-series volcanic seismic data. It includes both basic statistical
+and expert domain-specific features, with a focus on preventing data leakage
+during feature computation.
+
+The feature extraction pipeline supports:
+- Multi-scale temporal windows for capturing patterns at different time scales
+- Statistical features (mean, std, skewness, kurtosis, quantiles)
+- Expert volcanological features (thermal momentum, energy buildup, precursor scores)
+- Algorithmic state detection without data leakage
+- Parallel processing for large datasets with automatic segmentation
+
+@author: KRIBET Naoufal
+@affiliation: 5th year Engineering Student, EOST (École et Observatoire des Sciences de la Terre)
+@date: 2025-11-17
+@version: 1.0
+"""
 
 import pandas as pd
 import numpy as np
@@ -10,16 +30,29 @@ import warnings
 warnings.filterwarnings('ignore')
 from ui_dialogs import ProcessingDialog
 import re
-
-# Import de la fonction de segmentation depuis le module voisin.
 from .data_processor import split_dataframe_on_gaps
 
 def _dummy_update_progress(value: int, message: str):
-    """Callback de progression qui ne fait rien."""
+    """
+    Dummy progress callback that does nothing.
+    
+    Used as default when no UI progress tracking is needed.
+    
+    @param value: Progress value (0-100)
+    @param message: Progress message
+    @author: KRIBET Naoufal
+    """
     pass
 
 def _dummy_is_cancelled() -> bool:
-    """Callback d'annulation qui ne s'annule jamais."""
+    """
+    Dummy cancellation callback that never cancels.
+    
+    Used as default when no cancellation mechanism is needed.
+    
+    @return: Always False (never cancelled)
+    @author: KRIBET Naoufal
+    """
     return False
 
 
@@ -27,72 +60,114 @@ def add_algorithmic_state_features(df: pd.DataFrame,
                                    activity_window: int = 120, 
                                    activity_std_threshold: float = 2.0) -> pd.DataFrame:
     """
-    Ajoute des caractéristiques d'état basées sur des seuils dynamiques, SANS fuite de données.
-    Cette fonction est causalement correcte et peut être utilisée avant l'entraînement.
-
-    Args:
-        df (pd.DataFrame): DataFrame d'entrée contenant au moins la colonne 'VRP'.
-        activity_window (int): Taille de la fenêtre (en points) pour calculer la normale locale.
-        activity_std_threshold (float): Nombre d'écarts-types au-dessus de la médiane pour 
-                                        considérer le signal comme "actif".
-
-    Returns:
-        pd.DataFrame: Le DataFrame original enrichi de nouvelles colonnes d'état.
+    Adds state features based on dynamic thresholds WITHOUT data leakage.
+    
+    This function implements a causally correct activity detection algorithm
+    that can be safely used before model training. It identifies "active" periods
+    based on deviation from rolling baseline statistics, then tracks temporal
+    and energetic properties of these active states.
+    
+    The algorithm is causal because at each time point, it only uses information
+    from the past (via backward-looking rolling windows), ensuring no future
+    information leaks into the features.
+    
+    @param df: Input DataFrame containing at least the 'VRP' column
+    @param activity_window: Window size (in points) for computing local baseline
+    @param activity_std_threshold: Number of standard deviations above median
+                                    to consider signal as "active"
+    @return: Original DataFrame enriched with new state columns:
+             - time_in_active_state: Cumulative time spent in current active block
+             - energy_in_active_state: Cumulative energy in current active block
+    @raises ValueError: If 'VRP' column is missing from input DataFrame
+    
+    @author: KRIBET Naoufal
     """
-    print("--- Calcul des caractéristiques d'état algorithmiques (SANS fuite de données) ---")
+    print("--- Computing algorithmic state features (WITHOUT data leakage) ---")
     df_out = df.copy()
     if 'VRP' not in df_out.columns:
-        raise ValueError("La colonne 'VRP' est requise.")
+        raise ValueError("'VRP' column is required.")
     
     vrp_series = df_out['VRP']
 
-    # 1. Définir le seuil d'activité dynamique pour chaque point
+    # 1. Define dynamic activity threshold for each point
     long_rolling = vrp_series.rolling(window=activity_window, min_periods=activity_window // 4)
     median = long_rolling.median().fillna(method='bfill').fillna(method='ffill')
     std = long_rolling.std().fillna(method='bfill').fillna(method='ffill').replace(0, 1e-6)
     activity_threshold = median + (activity_std_threshold * std)
 
-    # 2. Déterminer les périodes d'activité algorithmique
+    # 2. Determine algorithmic activity periods
     is_active = (vrp_series > activity_threshold)
 
-    # 3. Identifier les blocs d'activité et calculer le temps écoulé
+    # 3. Identify activity blocks and calculate elapsed time
     is_active_start = (is_active & ~is_active.shift(1, fill_value=False))
     active_block_id = is_active_start.cumsum()
     active_blocks = active_block_id[is_active]
     
     time_in_state = active_blocks.groupby(active_blocks).cumcount()
     
-    # 4. Calculer l'énergie cumulative dans ces blocs
+    # 4. Calculate cumulative energy in these blocks
     vrp_active = vrp_series[is_active]
     energy_in_state = vrp_active.groupby(active_blocks).cumsum()
 
-    # 5. Assigner les nouvelles caractéristiques au DataFrame de sortie
+    # 5. Assign new features to output DataFrame
     df_out['time_in_active_state'] = time_in_state
     df_out['energy_in_active_state'] = energy_in_state
 
-    # Remplir les NaNs (périodes inactives) avec 0, car le temps et l'énergie sont nuls
+    # Fill NaNs (inactive periods) with 0, as time and energy are null
     df_out['time_in_active_state'] = df_out['time_in_active_state'].fillna(0)
     df_out['energy_in_active_state'] = df_out['energy_in_active_state'].fillna(0)
     
-    print(f"{is_active.sum()} points détectés comme 'actifs' par l'algorithme.")
-    print("Caractéristiques 'time_in_active_state' et 'energy_in_active_state' créées.")
+    print(f"{is_active.sum()} points detected as 'active' by algorithm.")
+    print("Features 'time_in_active_state' and 'energy_in_active_state' created.")
     print("-------------------------------------------------------------------")
     return df_out
+
+
 class FeatureCalculator:
-    """Calculateur de features optimisé avec cache et parallélisation"""
+    """
+    Optimized feature calculator with caching and parallelization.
+    
+    This class provides efficient methods for computing statistical features
+    on time-series data, with built-in caching to avoid redundant calculations.
+    
+    @author: KRIBET Naoufal
+    """
     
     def __init__(self, max_cache_size: int = 128):
+        """
+        Initialize the feature calculator.
+        
+        @param max_cache_size: Maximum size for LRU cache
+        @author: KRIBET Naoufal
+        """
         self.cache_size = max_cache_size
         self._rolling_cache = {}
     
     @lru_cache(maxsize=64)
     def _get_rolling_window(self, series_id: str, window: int, min_periods: int) -> pd.core.window.rolling.Rolling:
-        """Cache les objets rolling pour éviter la recréation"""
+        """
+        Cache rolling window objects to avoid recreation.
+        
+        @param series_id: Unique identifier for the series
+        @param window: Window size
+        @param min_periods: Minimum periods required
+        @return: Rolling window object
+        @author: KRIBET Naoufal
+        """
         pass
     
     def calculate_slope_vectorized(self, series: pd.Series, window: Union[str, int]) -> pd.Series:
         """
-        Version vectorisée du calcul de pente - ACCEPTE BOTH STR ET INT
+        Vectorized slope calculation - ACCEPTS BOTH STRING AND INT windows.
+        
+        Computes linear regression slope over rolling windows using an optimized
+        vectorized algorithm. This is much faster than scipy.stats.linregress
+        applied repeatedly.
+        
+        @param series: Input time series
+        @param window: Window size (int for points, str for time like '30min')
+        @return: Series of slope values
+        @author: KRIBET Naoufal
         """
         def fast_slope(x: np.ndarray) -> float:
             if len(x) < 2 or np.isnan(x).sum() > len(x) // 2:
@@ -120,20 +195,31 @@ class FeatureCalculator:
                 
             return (n_clean * sum_xy - sum_x * sum_y) / denominator
         
-        # Calculer min_periods basé sur le type de window
+        # Calculate min_periods based on window type
         if isinstance(window, str):
-            min_periods = 2  # Pour les fenêtres temporelles
+            min_periods = 2  # For time windows
         else:
-            min_periods = max(2, window // 4)  # Pour les fenêtres en points
+            min_periods = max(2, window // 4)  # For point windows
         
         return series.rolling(window=window, min_periods=min_periods).apply(fast_slope, raw=True)
     
     def calculate_multiple_rolling_stats(self, series: pd.Series, windows: List[Union[str, int]], 
                                        stats: List[str]) -> Dict[str, pd.Series]:
-        """Calcule plusieurs statistiques sur plusieurs fenêtres en une seule passe"""
+        """
+        Calculate multiple statistics over multiple windows in a single pass.
+        
+        This method is optimized to compute various statistics (mean, median, std, etc.)
+        across different window sizes efficiently by reusing rolling window objects.
+        
+        @param series: Input time series
+        @param windows: List of window sizes
+        @param stats: List of statistic names to compute
+        @return: Dictionary mapping feature names to computed Series
+        @author: KRIBET Naoufal
+        """
         results = {}
         
-        # Pré-calculer tous les objets rolling nécessaires
+        # Pre-calculate all necessary rolling objects
         rolling_objects = {}
         for w in windows:
             if isinstance(w, str):
@@ -142,7 +228,7 @@ class FeatureCalculator:
                 min_periods = max(1, w//4)
             rolling_objects[w] = series.rolling(window=w, min_periods=min_periods)
         
-        # Calculer toutes les stats demandées
+        # Calculate all requested stats
         stat_functions = {
             'mean': lambda r: r.mean(),
             'median': lambda r: r.median(),
@@ -164,11 +250,21 @@ class FeatureCalculator:
         return results
     
     def calculate_advanced_stats_batch(self, series: pd.Series, windows: List[Union[str, int]]) -> Dict[str, pd.Series]:
-        """Calcule les statistiques avancées par batch pour plus d'efficacité"""
+        """
+        Calculate advanced statistics in batch for better efficiency.
+        
+        Computes kurtosis and skewness across multiple windows with proper
+        error handling and fallback mechanisms.
+        
+        @param series: Input time series
+        @param windows: List of window sizes
+        @return: Dictionary of advanced statistics
+        @author: KRIBET Naoufal
+        """
         results = {}
         
         for window in windows:
-            # Calculer min_periods approprié
+            # Calculate appropriate min_periods
             if isinstance(window, str):
                 min_periods = 3
                 window_key = str(window).replace('min', '').replace('s', '')
@@ -178,7 +274,7 @@ class FeatureCalculator:
             
             rolling_obj = series.rolling(window=window, min_periods=min_periods)
             
-            # Kurtosis et skewness optimisés
+            # Optimized kurtosis and skewness
             try:
                 results[f'kurtosis{window_key}'] = rolling_obj.apply(
                     lambda x: kurtosis(x[~np.isnan(x)]) if len(x[~np.isnan(x)]) >= 4 else np.nan,
@@ -190,7 +286,7 @@ class FeatureCalculator:
                 )
             except Exception as e:
                 print(f"Warning: Advanced stats calculation failed for window {window}: {e}")
-                # Fallback avec des valeurs nulles
+                # Fallback with null values
                 results[f'kurtosis{window_key}'] = pd.Series(np.nan, index=series.index)
                 results[f'skewness{window_key}'] = pd.Series(np.nan, index=series.index)
         
@@ -198,23 +294,41 @@ class FeatureCalculator:
 
 
 class ExpertFeaturesCalculator:
-    """Calculateur de features expertes optimisé avec types cohérents"""
+    """
+    Calculator for expert volcanological features with optimized type handling.
+    
+    This class implements domain-specific features developed in consultation
+    with volcanology experts, designed to capture physical processes relevant
+    to eruption forecasting.
+    
+    @author: KRIBET Naoufal
+    """
     
     @staticmethod
     def calculate_thermal_momentum_vectorized(series: pd.Series, window_points: int, sampling_rate_minutes: int = 5) -> pd.Series:
         """
-        CORRIGÉ : Calcul du momentum thermique robuste
+        CORRECTED: Robust thermal momentum calculation.
+        
+        Thermal momentum represents the rate of change in volcanic activity,
+        analogous to physical momentum. It helps identify acceleration phases
+        that may precede eruptions.
+        
+        @param series: Input VRP time series
+        @param window_points: Window size in number of points
+        @param sampling_rate_minutes: Sampling rate in minutes
+        @return: Thermal momentum series
+        @author: KRIBET Naoufal
         """
         try:
-            # Shift en nombre de périodes (entier)
+            # Shift by number of periods (integer)
             shift_periods = int(window_points)
             shifted_series = series.shift(periods=shift_periods)
             
-            # S'assurer que les deux séries sont numériques
+            # Ensure both series are numeric
             if shifted_series is None or len(shifted_series) == 0:
                 return pd.Series(0.0, index=series.index)
                 
-            # Calcul du momentum avec gestion des erreurs
+            # Calculate momentum with error handling
             numerator = series - shifted_series
             result = numerator / float(window_points)
             
@@ -222,14 +336,23 @@ class ExpertFeaturesCalculator:
             
         except Exception as e:
             print(f"Warning in thermal_momentum calculation: {e}")
-            # Fallback: retourner une série de zéros
+            # Fallback: return series of zeros
             return pd.Series(0.0, index=series.index)
     
     @staticmethod
     def calculate_energy_buildup_ratio_vectorized(series: pd.Series, short_window: Union[str, int], 
                                                 long_window: Union[str, int]) -> pd.Series:
         """
-        CORRIGÉ : Accepte les deux types mais assure la cohérence
+        CORRECTED: Accepts both types but ensures consistency.
+        
+        Energy buildup ratio compares short-term to long-term energy levels,
+        highlighting rapid increases that may signal impending eruptions.
+        
+        @param series: Input VRP time series
+        @param short_window: Short-term window
+        @param long_window: Long-term window
+        @return: Energy buildup ratio series
+        @author: KRIBET Naoufal
         """
         short_mean = series.rolling(short_window, min_periods=1).mean()
         long_mean = series.rolling(long_window, min_periods=1).mean()
@@ -238,7 +361,16 @@ class ExpertFeaturesCalculator:
     
     @staticmethod
     def calculate_acceleration_features(features_df: pd.DataFrame) -> Dict[str, pd.Series]:
-        """Calcule toutes les accélérations en une fois"""
+        """
+        Calculate all acceleration features at once.
+        
+        Acceleration (second derivative) of key features can reveal
+        changing trends that precede volcanic events.
+        
+        @param features_df: DataFrame containing base features
+        @return: Dictionary of acceleration features
+        @author: KRIBET Naoufal
+        """
         acceleration_features = {}
         
         acceleration_columns = [col for col in features_df.columns 
@@ -253,27 +385,41 @@ class ExpertFeaturesCalculator:
     @staticmethod
     def calculate_zscore_vectorized(series: pd.Series, window: Union[str, int]) -> pd.Series:
         """
-        Calcule le Z-Score glissant pour normaliser le signal par rapport à son histoire locale.
-        Rend la feature indépendante de l'échelle absolue de l'événement.
+        Calculate rolling Z-Score to normalize signal relative to local history.
+        
+        Z-Score makes features scale-independent, allowing the model to
+        recognize patterns regardless of absolute event magnitude.
+        
+        @param series: Input time series
+        @param window: Window size for computing statistics
+        @return: Z-Score normalized series
+        @author: KRIBET Naoufal
         """
-        # min_periods est crucial pour ne pas avoir de zéros au début
+        # min_periods is crucial to avoid zeros at the beginning
         min_periods = int(window) // 4 if isinstance(window, int) else 20 
         
         rolling_stats = series.rolling(window, min_periods=min_periods)
         mean = rolling_stats.mean()
         std = rolling_stats.std()
         
-        # Remplacer les std nuls ou très faibles pour éviter la division par zéro
+        # Replace null or very small std to avoid division by zero
         safe_std = std.replace(0, np.nan).fillna(method='ffill').fillna(1e-6)
         
         z_score = (series - mean) / safe_std
-        return z_score.fillna(0.0) # Les NaNs au début sont remplacés par 0
+        return z_score.fillna(0.0)  # Initial NaNs replaced with 0
 
     @staticmethod
     def calculate_range_position_vectorized(series: pd.Series, window: Union[str, int]) -> pd.Series:
         """
-        Calcule la position relative du signal (entre 0 et 1) dans son étendue locale.
-        Une valeur de 1 signifie que le signal est à son maximum sur la fenêtre.
+        Calculate relative signal position (between 0 and 1) within local range.
+        
+        A value of 1 means the signal is at its maximum over the window,
+        providing scale-independent information about signal state.
+        
+        @param series: Input time series
+        @param window: Window size
+        @return: Range position series (0-1)
+        @author: KRIBET Naoufal
         """
         min_periods = int(window) // 4 if isinstance(window, int) else 20
 
@@ -282,17 +428,24 @@ class ExpertFeaturesCalculator:
         max_val = rolling_window.max()
         
         range_val = max_val - min_val
-        # Éviter la division par zéro si la fenêtre est plate
+        # Avoid division by zero if window is flat
         safe_range = range_val.replace(0, 1e-6)
         
         position = (series - min_val) / safe_range
-        return position.fillna(0.0) # Remplir les NaNs initiaux
+        return position.fillna(0.0)  # Fill initial NaNs
 
     @staticmethod
     def calculate_interquantile_range_vectorized(series: pd.Series, window: Union[str, int], 
                                                low_q: float = 0.1, high_q: float = 0.9) -> pd.Series:
         """
-        Calcule l'étendue interquantile, une mesure de volatilité robuste au bruit et aux outliers.
+        Calculate interquantile range, a robust volatility measure resistant to noise and outliers.
+        
+        @param series: Input time series
+        @param window: Window size
+        @param low_q: Lower quantile (default 0.1 = 10th percentile)
+        @param high_q: Upper quantile (default 0.9 = 90th percentile)
+        @return: Interquantile range series
+        @author: KRIBET Naoufal
         """
         min_periods = int(window) // 4 if isinstance(window, int) else 20
 
@@ -306,21 +459,30 @@ class ExpertFeaturesCalculator:
     
     @staticmethod
     def calculate_volatility_ratios_batch(features_df: pd.DataFrame) -> Dict[str, pd.Series]:
-        """Calcule tous les ratios de volatilité de manière optimisée"""
+        """
+        Calculate all volatility ratios in an optimized manner.
+        
+        Volatility ratios between different time scales can reveal changing
+        dynamic regimes characteristic of pre-eruptive phases.
+        
+        @param features_df: DataFrame containing std features
+        @return: Dictionary of volatility ratio features
+        @author: KRIBET Naoufal
+        """
         ratios = {}
         
         std_columns = [col for col in features_df.columns if 'std' in col]
         windows = []
         
-        # Extraction plus robuste des numéros de fenêtres
+        # More robust extraction of window numbers
         for col in std_columns:
             numbers = re.findall(r'\d+', col)
             if numbers:
                 windows.extend([int(num) for num in numbers])
         
-        windows = sorted(list(set(windows)))  # Unique et trié
+        windows = sorted(list(set(windows)))  # Unique and sorted
         
-        # Calculer tous les ratios possibles entre fenêtres courtes et longues
+        # Calculate all possible ratios between short and long windows
         for i, short_win in enumerate(windows[:-1]):
             for long_win in windows[i+1:]:
                 short_col = f'std{short_win}'
@@ -334,11 +496,20 @@ class ExpertFeaturesCalculator:
 
 
 def calculate_eruption_precursor_score_optimized(features_df: pd.DataFrame) -> pd.Series:
-    """Version optimisée du score composite utilisant numpy vectorisé"""
-    # Initialiser le score avec des zéros
+    """
+    Optimized version of composite precursor score using vectorized numpy.
+    
+    This expert-designed score combines multiple features weighted by their
+    importance for eruption forecasting, based on volcanological domain knowledge.
+    
+    @param features_df: DataFrame containing required features
+    @return: Composite precursor score series
+    @author: KRIBET Naoufal
+    """
+    # Initialize score with zeros
     score = np.zeros(len(features_df))
     
-    # Définir les poids et features de manière optimisée
+    # Define weights and features in optimized manner
     feature_weights = {
         'slope30_accel': 0.3,
         'volatility_ratio_10_50': 0.3,
@@ -346,16 +517,16 @@ def calculate_eruption_precursor_score_optimized(features_df: pd.DataFrame) -> p
         'kurtosis30': 0.1
     }
     
-    # Calcul vectorisé de tous les composants du score
+    # Vectorized calculation of all score components
     for feature, weight in feature_weights.items():
         if feature in features_df.columns:
             values = features_df[feature].fillna(0).values
             
             if feature == 'volatility_ratio_10_50':
-                # Normalisation autour de 0
+                # Normalization around 0
                 values = values - 1
             elif feature == 'kurtosis30':
-                # Clipping pour éviter la domination
+                # Clipping to avoid domination
                 values = np.clip(values, -5, 5)
             
             score += weight * values
@@ -364,24 +535,44 @@ def calculate_eruption_precursor_score_optimized(features_df: pd.DataFrame) -> p
 
 
 class WindowManager:
-    """Gestionnaire centralisé des fenêtres pour éviter les incohérences"""
+    """
+    Centralized window manager to avoid inconsistencies.
+    
+    This class ensures consistent window handling across all feature
+    calculations by maintaining a single source of truth for window
+    sizes and their properties.
+    
+    @author: KRIBET Naoufal
+    """
     
     def __init__(self, config: Dict, sampling_rate_minutes: int = 5):
+        """
+        Initialize window manager from configuration.
+        
+        @param config: Feature extraction configuration
+        @param sampling_rate_minutes: Data sampling rate in minutes
+        @author: KRIBET Naoufal
+        """
         self.config = config
         self.sampling_rate = sampling_rate_minutes
         self.windows_points = self._extract_windows_from_config()
         self.windows_mapping = self._create_windows_mapping()
     
     def _extract_windows_from_config(self) -> List[int]:
-        """Extrait les tailles de fenêtres uniques de la configuration"""
+        """
+        Extract unique window sizes from configuration.
+        
+        @return: Sorted list of window sizes in points
+        @author: KRIBET Naoufal
+        """
         windows = set()
         
-        # 1. Extraction depuis les SpinBox de l'UI
+        # 1. Extract from UI SpinBox values
         for key, value in self.config.get('window_sizes', {}).items():
             if isinstance(value, int):
                 windows.add(value)
         
-        # 2. Extraction depuis les noms de features
+        # 2. Extract from feature names
         for feature in self.config.get('features', []):
             found_numbers = re.findall(r'\d+', feature)
             for num_str in found_numbers:
@@ -390,7 +581,12 @@ class WindowManager:
         return sorted(list(windows))
     
     def _create_windows_mapping(self) -> Dict[int, Dict[str, Union[str, int]]]:
-        """Crée un mapping cohérent entre points et temps"""
+        """
+        Create consistent mapping between points and time.
+        
+        @return: Dictionary mapping window sizes to their properties
+        @author: KRIBET Naoufal
+        """
         mapping = {}
         for points in self.windows_points:
             time_str = f"{points * self.sampling_rate}min"
@@ -403,7 +599,13 @@ class WindowManager:
         return mapping
     
     def get_window_info(self, points: int) -> Dict:
-        """Retourne les infos complètes pour une fenêtre donnée"""
+        """
+        Return complete information for a given window.
+        
+        @param points: Window size in points
+        @return: Dictionary with window properties
+        @author: KRIBET Naoufal
+        """
         return self.windows_mapping.get(points, {
             'points': points,
             'time_str': f"{points * self.sampling_rate}min",
@@ -419,54 +621,74 @@ def extract_features_optimized(
     update_progress: Callable = _dummy_update_progress,
     is_cancelled: Callable = _dummy_is_cancelled
 ) -> Optional[pd.DataFrame]:
+    """
+    Main feature extraction function with algorithmic state features.
     
-    print("🚀 Démarrage de l'extraction de features (version avec état algorithmique).")
+    This is the primary entry point for feature extraction. It orchestrates
+    the entire pipeline including:
+    1. Adding algorithmic state features without data leakage
+    2. Segmenting the time series based on gaps
+    3. Parallel processing of segments
+    4. Feature calculation and selection
+    5. Final assembly and validation
     
-    # 1. AJOUT DES FEATURES D'ÉTAT SANS FUITE DE DONNÉES
-    # Cette étape est cruciale et se fait en amont sur le DataFrame complet.
+    @param df: Input DataFrame with 'VRP' and 'Date' columns
+    @param config: Feature extraction configuration dictionary
+    @param max_gap_str: Maximum gap duration before splitting (e.g., "1 day")
+    @param update_progress: Optional callback for progress updates
+    @param is_cancelled: Optional callback to check for cancellation
+    @return: DataFrame with extracted features, or None if extraction fails
+    
+    @author: KRIBET Naoufal
+    """
+    
+    print("🚀 Starting feature extraction (version with algorithmic state).")
+    
+    # 1. ADD STATE FEATURES WITHOUT DATA LEAKAGE
+    # This critical step is performed upfront on the complete DataFrame
     try:
         df_with_state = add_algorithmic_state_features(df)
     except Exception as e:
-        print(f"❌ ERREUR critique lors du calcul des features d'état : {e}")
+        print(f"❌ CRITICAL ERROR during state feature calculation: {e}")
         return None
 
-    # 2. INITIALISATION DES CALCULATEURS (inchangé)
+    # 2. INITIALIZE CALCULATORS (unchanged)
     safe_config = config.copy()
     feature_calc = FeatureCalculator()
     expert_calc = ExpertFeaturesCalculator()
     window_manager = WindowManager(safe_config)
     
-    # 3. SEGMENTATION (se fait maintenant sur le DataFrame enrichi)
+    # 3. SEGMENTATION (now performed on enriched DataFrame)
     try:
         max_gap_duration = pd.to_timedelta(max_gap_str)
-        # La fonction de segmentation préserve l'index et les nouvelles colonnes
+        # Segmentation function preserves index and new columns
         segments = split_dataframe_on_gaps(df_with_state, max_gap_duration)
     except Exception as e:
-        print(f"⚠️ Erreur de segmentation : {e}. Traitement en un seul segment.")
+        print(f"⚠️ Segmentation error: {e}. Processing as single segment.")
         segments = [df_with_state]
 
-    # 4. TRAITEMENT PARALLÈLE DES SEGMENTS (inchangé)
+    # 4. PARALLEL SEGMENT PROCESSING (unchanged)
     if len(segments) > 1:
-        print(f"📊 Traitement parallèle de {len(segments)} segments...")
-        # Simulé pour la simplicité, vous pouvez réactiver votre ThreadPoolExecutor ici
+        print(f"📊 Parallel processing of {len(segments)} segments...")
+        # Simplified for clarity, you can reactivate ThreadPoolExecutor here
         processed_segments = [_process_single_segment(s, safe_config, feature_calc, expert_calc, window_manager) for s in segments]
     else:
-        print("📊 Traitement d'un seul segment...")
+        print("📊 Processing single segment...")
         processed_segments = [_process_single_segment(segments[0], safe_config, feature_calc, expert_calc, window_manager)]
     
     valid_segments = [seg for seg in processed_segments if seg is not None and not seg.empty]
     if not valid_segments:
-        print("❌ Aucun segment valide traité, l'extraction a échoué.")
+        print("❌ No valid segments processed, extraction failed.")
         return None
     
-    # 5. CONCATÉNATION ET FINALISATION
-    print("🔗 Assemblage final des segments...")
+    # 5. CONCATENATION AND FINALIZATION
+    print("🔗 Final assembly of segments...")
     final_features_df = pd.concat(valid_segments, ignore_index=False, sort=False)
     
-    # Sélection finale des caractéristiques demandées par l'utilisateur
+    # Final selection of user-requested features
     final_features_df = _finalize_feature_selection(final_features_df, safe_config)
     
-    print(f"✅ Extraction terminée : {len(final_features_df)} lignes × {final_features_df.shape[1]} features")
+    print(f"✅ Extraction completed: {len(final_features_df)} rows × {final_features_df.shape[1]} features")
     
     return final_features_df
 
@@ -476,16 +698,26 @@ def _process_segments_parallel(segments: List[pd.DataFrame], config: Dict,
                              feature_calc: FeatureCalculator, 
                              expert_calc: ExpertFeaturesCalculator,
                              window_manager: WindowManager) -> List[pd.DataFrame]:
-    """Traite les segments en parallèle avec configuration sécurisée"""
+    """
+    Process segments in parallel with safe configuration.
+    
+    @param segments: List of DataFrame segments to process
+    @param config: Feature extraction configuration
+    @param feature_calc: Feature calculator instance
+    @param expert_calc: Expert features calculator instance
+    @param window_manager: Window manager instance
+    @return: List of processed DataFrames
+    @author: KRIBET Naoufal
+    """
     
     processed_segments = []
     
-    # Utiliser ThreadPoolExecutor pour la parallélisation
+    # Use ThreadPoolExecutor for parallelization
     with ThreadPoolExecutor(max_workers=min(4, len(segments))) as executor:
-        # Soumettre tous les segments avec des copies de config
+        # Submit all segments with copies of config
         future_to_segment = {}
         for i, segment in enumerate(segments):
-            # Chaque thread reçoit sa propre copie des objets
+            # Each thread receives its own object copies
             thread_config = config.copy()
             thread_feature_calc = FeatureCalculator()
             thread_expert_calc = ExpertFeaturesCalculator()
@@ -501,16 +733,16 @@ def _process_segments_parallel(segments: List[pd.DataFrame], config: Dict,
             )
             future_to_segment[future] = i
         
-        # Récupérer les résultats dans l'ordre
+        # Retrieve results in order
         results = [None] * len(segments)
         for future in as_completed(future_to_segment):
             segment_idx = future_to_segment[future]
             try:
                 result = future.result()
                 results[segment_idx] = result
-                print(f"  ✓ Segment {segment_idx + 1} traité")
+                print(f"  ✓ Segment {segment_idx + 1} processed")
             except Exception as e:
-                print(f"  ❌ Erreur segment {segment_idx + 1}: {e}")
+                print(f"  ❌ Error segment {segment_idx + 1}: {e}")
                 results[segment_idx] = None
         
         processed_segments = [r for r in results if r is not None]
@@ -523,37 +755,46 @@ def _process_single_segment(segment_df: pd.DataFrame, config: Dict,
                           expert_calc: ExpertFeaturesCalculator,
                           window_manager: WindowManager) -> Optional[pd.DataFrame]:
     """
-    Traite un segment unique en calculant toutes les caractéristiques requises sur le VRP
-    et en CONSERVANT les caractéristiques pré-calculées.
-    VERSION FINALE ROBUSTE, avec une gestion correcte des petites fenêtres.
+    Process a single segment by calculating all required features on VRP
+    while PRESERVING pre-calculated features.
+    
+    FINAL ROBUST VERSION with correct handling of small windows.
+    
+    @param segment_df: DataFrame segment to process
+    @param config: Feature extraction configuration
+    @param feature_calc: Feature calculator instance
+    @param expert_calc: Expert features calculator instance
+    @param window_manager: Window manager instance
+    @return: Processed DataFrame with features or None if processing fails
+    @author: KRIBET Naoufal
     """
     if 'VRP' not in segment_df.columns or segment_df.empty:
-        print("    -> AVERTISSEMENT: Segment vide ou sans colonne 'VRP'. Ignoré.")
+        print("    -> WARNING: Empty segment or missing 'VRP' column. Ignored.")
         return None
 
     features_df = segment_df.copy()
     data_series = features_df['VRP']
     
-    print(f"  -> Traitement d'un segment de {len(data_series)} points. Fenêtres : {window_manager.windows_points}")
+    print(f"  -> Processing segment of {len(data_series)} points. Windows: {window_manager.windows_points}")
 
     log_data_series = np.log1p(data_series.clip(lower=0))
-    print("  -> Transformation logarithmique du signal VRP effectuée.")
+    print("  -> Logarithmic transformation of VRP signal completed.")
 
     for points in window_manager.windows_points:
-        time_window_str = f"{points * 5}min"  # Assumant 5 minutes/point
+        time_window_str = f"{points * 5}min"  # Assuming 5 minutes/point
 
-        # --- CORRECTION : Logique de min_periods centralisée et plus sûre ---
-        # Pour les stats de base, on peut être souple.
+        # --- CORRECTION: Centralized and safer min_periods logic ---
+        # For basic stats, we can be flexible
         min_p_base = max(1, points // 4)
-        # Pour les stats avancées (kurtosis, quantiles), il faut plus de points.
+        # For advanced stats (kurtosis, quantiles), we need more points
         min_p_advanced = max(4, points // 2)
 
-        # Vérifier si la fenêtre est assez grande pour les calculs avancés
+        # Check if window is large enough for advanced calculations
         if points < 4:
-            print(f"    -> Fenêtre de {points} pts trop petite pour les stats avancées. Ignorées.")
-            min_p_advanced = points # S'assurer de ne pas demander plus de points que la taille de la fenêtre
+            print(f"    -> Window of {points} pts too small for advanced stats. Skipped.")
+            min_p_advanced = points  # Ensure we don't request more points than window size
 
-        # --- ÉTAPE 1 : Calcul des composants de base ---
+        # --- STEP 1: Calculate base components ---
         rolling_base = data_series.rolling(time_window_str, min_periods=min_p_base)
         rolling_adv = data_series.rolling(time_window_str, min_periods=min_p_advanced)
 
@@ -562,29 +803,29 @@ def _process_single_segment(segment_df: pd.DataFrame, config: Dict,
         mean_val = rolling_base.mean()
         std_val = rolling_base.std()
         
-        # --- ÉTAPE 2 : Assemblage des caractéristiques finales à partir des composants ---
+        # --- STEP 2: Assemble final features from components ---
         features_df[f'median{points}'] = rolling_base.median()
         features_df[f'std{points}'] = std_val
         features_df[f'min{points}'] = min_val
         features_df[f'max{points}'] = max_val
         
-        # Caractéristiques avancées avec garde-fou
+        # Advanced features with safeguard
         if points >= 4:
             features_df[f'kurtosis{points}'] = rolling_adv.kurt()
             features_df[f'skewness{points}'] = rolling_adv.skew()
             q_low = rolling_adv.quantile(0.1)
             q_high = rolling_adv.quantile(0.9)
             features_df[f'iqr{points}'] = q_high - q_low
-        else: # Remplir avec 0 si la fenêtre est trop petite
+        else:  # Fill with 0 if window too small
             features_df[f'kurtosis{points}'] = 0.0
             features_df[f'skewness{points}'] = 0.0
             features_df[f'iqr{points}'] = 0.0
 
-        # Pente (Vitesse) et Accélération
+        # Slope (Velocity) and Acceleration
         features_df[f'slope{points}'] = feature_calc.calculate_slope_vectorized(data_series, window=time_window_str)
         features_df[f'slope{points}_accel'] = features_df[f'slope{points}'].diff()
 
-        # Caractéristiques de robustesse
+        # Robustness features
         safe_std = std_val.replace(0, 1e-6)
         features_df[f'zscore_{points}'] = (data_series - mean_val) / safe_std
 
@@ -595,50 +836,69 @@ def _process_single_segment(segment_df: pd.DataFrame, config: Dict,
         log_slope = feature_calc.calculate_slope_vectorized(log_data_series, window=time_window_str)
         features_df[f'log_slope{points}'] = log_slope
         
-        # L'accélération de la pente du log. Si la croissance est purement exponentielle,
-        # cette valeur devrait tendre vers zéro.
+        # Acceleration of log slope. If growth is purely exponential,
+        # this value should tend toward zero.
         features_df[f'log_slope{points}_accel'] = log_slope.diff()
-    # --- ÉTAPE 3 : Calculs post-boucle ---
-    print("  -> Calcul des caractéristiques composites (ratios, score)...")
+    
+    # --- STEP 3: Post-loop calculations ---
+    print("  -> Computing composite features (ratios, score)...")
     try:
         volatility_ratios = expert_calc.calculate_volatility_ratios_batch(features_df)
         features_df = features_df.assign(**volatility_ratios)
     except Exception as e:
-        print(f"    -> AVERTISSEMENT: Le calcul des ratios de volatilité a échoué: {e}")
+        print(f"    -> WARNING: Volatility ratio calculation failed: {e}")
         
     features_df['precursor_score'] = calculate_eruption_precursor_score_optimized(features_df)
     
-    # --- ÉTAPE 4 : NETTOYAGE FINAL ---
+    # --- STEP 4: FINAL CLEANUP ---
     features_df.fillna(0.0, inplace=True)
     
-    print(f"  -> Fin du traitement du segment. {features_df.shape[1]} caractéristiques au total.")
+    print(f"  -> Segment processing complete. {features_df.shape[1]} total features.")
     return features_df
+
+
 def _finalize_feature_selection(features_df: pd.DataFrame, config: Dict) -> pd.DataFrame:
     """
-    Finalise la sélection en appliquant la liste de l'utilisateur comme un filtre final.
-    L'extraction a déjà calculé un sur-ensemble de caractéristiques pour gérer les dépendances.
+    Finalize selection by applying user list as final filter.
+    
+    Extraction has already calculated a superset of features to handle dependencies.
+    This function filters down to exactly what the user requested.
+    
+    @param features_df: DataFrame with all calculated features
+    @param config: Configuration containing final feature selection
+    @return: DataFrame with only user-selected features
+    @author: KRIBET Naoufal
     """
     
-    # 1. Obtenir la liste EXACTE des features que l'utilisateur veut dans son jeu de données final.
+    # 1. Get EXACT list of features user wants in final dataset
     user_final_selection = config.get('features', [])
     
-    # 2. Sécurité : si la liste est vide, on retourne un DataFrame vide pour éviter les erreurs.
+    # 2. Safety: if list is empty, return empty DataFrame to avoid errors
     if not user_final_selection:
-        print("AVERTISSEMENT: Aucune caractéristique n'a été sélectionnée. Retour d'un DataFrame vide.")
+        print("WARNING: No features selected. Returning empty DataFrame.")
         return pd.DataFrame()
 
-    # 3. Utiliser .reindex() pour créer le DataFrame final. C'est la méthode la plus robuste.
-    #    - Elle sélectionne DANS features_df UNIQUEMENT les colonnes présentes dans votre liste.
-    #    - Si une colonne que vous avez demandée n'a pas pu être calculée (ex: dépendance non satisfaite),
-    #      elle sera quand même créée et remplie avec 0.0, évitant ainsi un crash.
+    # 3. Use .reindex() to create final DataFrame. This is the most robust method.
+    #    - It selects ONLY columns present in your list from features_df
+    #    - If a requested column couldn't be calculated (e.g., unsatisfied dependency),
+    #      it will still be created and filled with 0.0, avoiding crashes.
     final_df = features_df.reindex(columns=user_final_selection, fill_value=0.0)
     
-    # 4. Afficher un message clair et retourner le DataFrame final.
-    print(f"INFO: Sélection finale de {final_df.shape[1]} caractéristiques, strictement basée sur la sélection de l'utilisateur.")
+    # 4. Display clear message and return final DataFrame
+    print(f"INFO: Final selection of {final_df.shape[1]} features, strictly based on user selection.")
     
     return final_df.astype(np.float32)
 
-# Fonction de compatibilité avec l'ancienne API
+
+# Compatibility function with legacy API
 def extract_features(df: pd.DataFrame, config: Dict, **kwargs) -> Optional[pd.DataFrame]:
-    """Interface de compatibilité qui passe les kwargs à la fonction optimisée."""
+    """
+    Legacy API compatibility interface that passes kwargs to optimized function.
+    
+    @param df: Input DataFrame
+    @param config: Feature extraction configuration
+    @param kwargs: Additional keyword arguments
+    @return: DataFrame with extracted features
+    @author: KRIBET Naoufal
+    """
     return extract_features_optimized(df, config, **kwargs)

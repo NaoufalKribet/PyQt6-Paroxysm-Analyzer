@@ -9,7 +9,7 @@ and global (model-level) explanations for volcanic activity predictions.
 @author: KRIBET Naoufal
 @affiliation: 5th year Engineering Student, EOST (École et Observatoire des Sciences de la Terre)
 @date: 2025-11-12
-@version: 1.0
+@version: 2.0
 """
 
 import shap
