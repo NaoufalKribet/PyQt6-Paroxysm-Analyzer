@@ -11,6 +11,7 @@ from ui_dialogs import ProcessingDialog
 from Core.data_processor import load_data, define_internal_event_cycle, balance_dataset, extract_activity_blocks
 from Core.feature_extractor import extract_features
 from Core.model_trainer import (
+    train_and_evaluate_threshold,
     train_and_evaluate_knn,
     train_and_evaluate_rf,
     train_and_evaluate_lgbm,
@@ -601,9 +602,12 @@ class AppController(QObject):
         return self._create_temporal_weights(len(y), decay_rate)
 
     def _execute_training(self, X_train, y_train, X_val, y_val, X_test, y_test, params, sample_weights):
-        """Exécute l'entraînement proprement dit"""
-        self.status_updated.emit(f"Lancement de l'entraînement pour : {params['model_type']}...")
+        """
+        Executes the actual training process by selecting the correct strategy (model).
+        """
+        self.status_updated.emit(f"Starting training for: {params['model_type']}...")
         
+        # Creates a unified configuration object for all models
         model_config = ModelConfig(
             random_state=self.config.RANDOM_STATE,
             max_k=params['model_params']['max_k'],
@@ -618,19 +622,19 @@ class AppController(QObject):
             nn_learning_rate=params['model_params']['nn_learning_rate']
         )
         
-
+        # Dictionary acting as a registry of training strategies
         trainer_map = {
+            "Simple Threshold": train_and_evaluate_threshold,
             "Neural Network": train_and_evaluate_nn, 
             "K-Nearest Neighbors (KNN)": train_and_evaluate_knn,
             "Random Forest": train_and_evaluate_rf,
             "LightGBM": train_and_evaluate_lgbm,
-
-
         }
         
+        # Selects the correct training function based on the user's choice
         trainer_func = trainer_map[params['model_type']]
         
-        # CORRECTION : Appel de la fonction d'entraînement en passant les 6 jeux de données séparés
+        # Call the selected training function with all necessary arguments
         results = trainer_func(
             X_train, y_train, X_val, y_val, X_test, y_test, 
             model_config, sample_weight=sample_weights

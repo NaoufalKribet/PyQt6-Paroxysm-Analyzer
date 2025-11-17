@@ -57,7 +57,15 @@ Performance Considerations:
 
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import f1_score, make_scorer
+import logging
+import time
+from typing import Dict, Optional
+import pandas as pd
+import numpy as np
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
 import lightgbm as lgb
@@ -228,37 +236,74 @@ def timing_context(operation_name: str):
 def train_and_evaluate_knn(X_train: pd.DataFrame, y_train: pd.Series,
                           X_val: pd.DataFrame, y_val: pd.Series,
                           X_test: pd.DataFrame, y_test: pd.Series,
-                          config: ModelConfig) -> Dict:
+                          config: ModelConfig,
+                          sample_weight: Optional[np.ndarray] = None) -> Dict:
     """
-    Train and evaluate a K-Nearest Neighbors classifier.
+    Train and evaluate a K-Nearest Neighbors classifier using a rigorous,
+    time-series aware grid search for hyperparameter optimization.
     
-    Implements exhaustive grid search for optimal hyperparameters followed by
-    final model training on combined train+validation sets.
+    CORRECTED VERSION: This function now accepts the 'sample_weight' argument to 
+    maintain a consistent interface with other trainers, but it is ignored as the 
+    underlying scikit-learn KNN does not support it in its 'fit' method.
     
     @param X_train: Training features
-    @param y_train: Training labels  
-    @param X_val: Validation features
-    @param y_val: Validation labels
+    @param y_train: Training labels
+    @param X_val: Validation features (combined with train for CV)
+    @param y_val: Validation labels (combined with train for CV)
     @param X_test: Test features
     @param y_test: Test labels
     @param config: Model configuration object
+    @param sample_weight: Optional sample weights (accepted but ignored).
     @return: Dictionary containing model, predictions, and evaluation metrics
-    @raises ModelTrainerError: If no valid parameters are found
-    @author: KRIBET Naoufal
+    @author: KRIBET Naoufal (Updated by Gemini based on error traceback)
     """
-    # Step 1: Find optimal hyperparameters using validation set
-    with timing_context("KNN hyperparameter search"):
-        best_params, _ = _find_best_knn_params(X_train, y_train, X_val, y_val, config)
+    logging.info("--- Launching KNN search - Strategy: Time-Series Grid Search ---")
+
+    if sample_weight is not None:
+        logging.warning("Temporal weighting (sample_weight) is not supported by the standard KNN model and will be ignored.")
+
+    # Step 1: Combine train and validation sets for a proper cross-validation workflow
+    X_combined = pd.concat([X_train, X_val], axis=0)
+    y_combined = pd.concat([y_train, y_val], axis=0)
     
-    # Step 2: Train final model on combined train+validation data
-    with timing_context("Final KNN model training"):
-        X_combined = pd.concat([X_train, X_val], axis=0)
-        y_combined = pd.concat([y_train, y_val], axis=0)
-        final_knn = KNeighborsClassifier(**best_params).fit(X_combined, y_combined)
+    # Step 2: Define the hyperparameter grid to search
+    param_grid = {
+        'n_neighbors': range(1, config.max_k + 1),
+        'weights': config.weights,
+        'metric': config.metrics
+    }
     
-    # Step 3: Evaluate on test set
+    # Step 3: Setup the time-series cross-validation splitter with a gap
+    time_series_cv = TimeSeriesSplit(n_splits=3, gap=50)
+
+    # Step 4: Configure and run the Grid Search
+    with timing_context("KNN hyperparameter search (GridSearchCV + TimeSeriesSplit)"):
+        knn_base = KNeighborsClassifier(n_jobs=-1)
+        
+        # Using f1_macro as the scoring metric for consistency
+        grid_search = GridSearchCV(
+            estimator=knn_base,
+            param_grid=param_grid,
+            scoring='f1_macro',
+            cv=time_series_cv,
+            verbose=1,
+            n_jobs=-1 # Use all available cores for the search
+        )
+        
+        grid_search.fit(X_combined, y_combined) # sample_weight is not passed here
+        
+        best_knn = grid_search.best_estimator_
+        best_params = grid_search.best_params_
+        best_cv_score = grid_search.best_score_
+        
+        logging.info(f"Best KNN parameters found via Grid Search: {best_params}")
+        logging.info(f"Best cross-validation F1-macro score: {best_cv_score:.4f}")
+
+    # Step 5: Evaluate the best model found on the unseen test set
     with timing_context("Final KNN evaluation"):
-        results = _evaluate_model(final_knn, X_test, y_test, best_params)
+        results = _evaluate_model(best_knn, X_test, y_test, best_params)
+        
+    logging.info(f"Final Test Set F1-macro score: {results['report']['macro avg']['f1-score']:.4f}")
     
     return results
 
@@ -1051,6 +1096,135 @@ def train_and_evaluate_lstm_pinn(X_train: pd.DataFrame, y_train: pd.Series,
         'training_history': history
     }
 
+class ThresholdClassifier:
+    """
+    A simple 'mock' classifier that encapsulates the threshold-based decision logic.
+    
+    It is designed to be compatible with the scikit-learn evaluation pipeline,
+    allowing it to be used as a baseline model within the existing framework.
+    
+    @author: KRIBET Naoufal
+    """
+    def __init__(self, threshold_value: float = 0.5, feature_name: str = 'median10', positive_class_name: str = 'Actif'):
+        self.threshold = threshold_value
+        self.feature = feature_name
+        self.positive_class = positive_class_name
+        # Define the classes the model can predict for compatibility
+        self.classes_ = np.array(['Calm', self.positive_class])
+
+    def fit(self, X, y):
+        """This model has no traditional 'fit' phase; the threshold is determined externally."""
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Predicts class labels based on the threshold applied to the specified feature."""
+        if self.feature not in X.columns:
+            raise ValueError(f"Feature '{self.feature}' not found in input data.")
+        return np.where(X[self.feature] >= self.threshold, self.positive_class, 'Calm')
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """
+        Simulates prediction probabilities for API compatibility with the evaluation pipeline.
+        Assigns a high confidence (0.99) to the predicted class.
+        """
+        if self.feature not in X.columns:
+            raise ValueError(f"Feature '{self.feature}' not found in input data.")
+            
+        # Check which instances meet the threshold condition
+        is_positive = (X[self.feature] >= self.threshold).values
+        # Create a probability array initialized to zero
+        probas = np.zeros((len(X), 2))
+        
+        # Assign high probability to the positive class where condition is met
+        probas[is_positive, 1] = 0.99
+        probas[is_positive, 0] = 0.01
+        
+        # Assign high probability to the 'Calm' class where condition is not met
+        probas[~is_positive, 0] = 0.99
+        probas[~is_positive, 1] = 0.01
+        
+        return probas
+
+    def get_params(self, deep=True):
+        """Required for scikit-learn compatibility (e.g., for use in pipelines)."""
+        return {'threshold_value': self.threshold, 'feature_name': self.feature}
+
+
+def train_and_evaluate_threshold(X_train: pd.DataFrame, y_train: pd.Series,
+                                 X_val: pd.DataFrame, y_val: pd.Series,
+                                 X_test: pd.DataFrame, y_test: pd.Series,
+                                 config: ModelConfig,
+                                 sample_weight: Optional[np.ndarray] = None) -> Dict:
+    """
+    "Trains" and evaluates a simple baseline classifier based on an optimal threshold.
+    
+    The training process consists of finding the single best threshold on a predefined
+    feature ('median10') that maximizes the F1-score on the combined training and
+    validation sets. This serves as a robust baseline to measure the value of more
+    complex models.
+    
+    @param X_train: Training features
+    @param y_train: Training labels
+    @param X_val: Validation features
+    @param y_val: Validation labels
+    @param X_test: Test features
+    @param y_test: Test labels
+    @param config: Model configuration object (unused, for compatibility)
+    @param sample_weight: Accepted for API compatibility, but ignored by this model.
+    @return: A results dictionary compatible with the application's pipeline.
+    @author: KRIBET Naoufal
+    """
+    logging.info("--- Launching Baseline Model: Simple Threshold ---")
+    
+    FEATURE_TO_USE = 'median10' # The single feature used to make the decision.
+
+    # Ensure the required feature is present in the dataset.
+    if FEATURE_TO_USE not in X_train.columns:
+        raise ValueError(f"The Threshold model requires the '{FEATURE_TO_USE}' feature, which is not present in the data.")
+
+    # Step 1: Combine training and validation data to find the optimal threshold.
+    X_combined = pd.concat([X_train, X_val], axis=0)
+    y_combined = pd.concat([y_train, y_val], axis=0)
+    
+    # Identify the positive class name (e.g., 'Actif', 'Pre-Event').
+    positive_class = next((label for label in y_combined.unique() if label != 'Calm'), None)
+    if not positive_class:
+        raise ValueError("Could not determine the positive class for the Threshold model.")
+    
+    logging.info(f"Optimizing threshold on feature '{FEATURE_TO_USE}' for target class '{positive_class}'.")
+
+    # Step 2: Define a range of candidate thresholds to test.
+    feature_values = X_combined[FEATURE_TO_USE]
+    # Test 100 thresholds spread across the feature's distribution (5th to 95th percentile)
+    # to remain robust to outliers.
+    threshold_candidates = np.linspace(feature_values.quantile(0.05), feature_values.quantile(0.95), 100)
+    
+    best_threshold = 0
+    best_f1 = -1
+
+    # Step 3: Iterate through candidates to find the best threshold.
+    for threshold in threshold_candidates:
+        y_pred = np.where(feature_values >= threshold, positive_class, 'Calm')
+        score = f1_score(y_combined, y_pred, pos_label=positive_class, zero_division=0)
+        
+        if score > best_f1:
+            best_f1 = score
+            best_threshold = threshold
+
+    logging.info(f"Best threshold found: {best_threshold:.2f} (yielding F1-Score of {best_f1:.4f} on validation data).")
+
+    # Step 4: Create the final model instance with the optimal threshold.
+    final_model = ThresholdClassifier(
+        threshold_value=best_threshold,
+        feature_name=FEATURE_TO_USE,
+        positive_class_name=positive_class
+    )
+    
+    # Step 5: Evaluate this simple model on the unseen test set using the standard evaluation function.
+    with timing_context("Final Threshold model evaluation"):
+        results = _evaluate_model(final_model, X_test, y_test, final_model.get_params())
+        
+    return results
 
 # --- Configure logging ---
 logging.basicConfig(
